@@ -1,4 +1,5 @@
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
+import { formatINR } from '../../context/ExpenseContext';
 import type { CategoryPoint } from '../../types/spendsense';
 
 const colors = ['#0EA5E9', '#06B6D4', '#10B981', '#F59E0B', '#FB7185', '#94A3B8'];
@@ -34,7 +35,7 @@ export function CategoryPieChart({ data }: CategoryPieChartProps) {
                 <Cell key={entry.name} fill={colors[index % colors.length]} />
               ))}
             </Pie>
-            <Tooltip formatter={(value: number) => `$${value.toFixed(2)}`} />
+            <Tooltip formatter={(value: number) => formatINR(value)} />
           </PieChart>
         </ResponsiveContainer>
       </div>

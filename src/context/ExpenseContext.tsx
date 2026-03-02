@@ -31,17 +31,17 @@ interface ExpenseContextValue {
 const STORAGE_KEY = 'spendsense-local-expenses';
 const ExpenseContext = createContext<ExpenseContextValue | null>(null);
 
-const currency = new Intl.NumberFormat('en-US', {
+const currency = new Intl.NumberFormat('en-IN', {
   style: 'currency',
-  currency: 'USD',
-  maximumFractionDigits: 2,
+  currency: 'INR',
+  maximumFractionDigits: 0,
 });
 
 const monthId = (date: Date): string =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 
 const monthLabel = (date: Date): string =>
-  date.toLocaleDateString('en-US', { month: 'short' });
+  date.toLocaleDateString('en-IN', { month: 'short' });
 
 const toMonthTotal = (items: Expense[], targetMonth: string): number =>
   items
@@ -167,4 +167,4 @@ export function useExpenses() {
   return context;
 }
 
-export const formatMoney = (amount: number): string => currency.format(amount);
+export const formatINR = (amount: number): string => currency.format(amount);

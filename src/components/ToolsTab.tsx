@@ -76,7 +76,7 @@ const DEMO_TOOLS: { def: ToolDefinition; executor: Parameters<typeof ToolCalling
       const tz = getStringArg(args, 'timezone') ?? 'UTC';
       try {
         const now = new Date();
-        const formatted = now.toLocaleString('en-US', { timeZone: tz, dateStyle: 'full', timeStyle: 'long' });
+        const formatted = now.toLocaleString('en-IN', { timeZone: tz, dateStyle: 'full', timeStyle: 'long' });
         return { datetime: toToolValue(formatted), timezone: toToolValue(tz) };
       } catch {
         return { datetime: toToolValue(new Date().toISOString()), timezone: toToolValue('UTC'), note: toToolValue('Fell back to UTC — invalid timezone') };

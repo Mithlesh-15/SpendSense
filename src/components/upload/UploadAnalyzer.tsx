@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type DragEvent } from 'react';
+import { formatINR } from '../../context/ExpenseContext';
 import { analyzeFileLocally } from '../../services/localAi';
 import type { ExtractedTransaction } from '../../types/spendsense';
 
@@ -88,7 +89,7 @@ export function UploadAnalyzer() {
                     {row.date} • {row.category}
                   </p>
                 </div>
-                <p className="font-semibold text-slate-900">${row.amount.toFixed(2)}</p>
+                <p className="font-semibold text-slate-900">{formatINR(row.amount)}</p>
               </li>
             ))}
           </ul>

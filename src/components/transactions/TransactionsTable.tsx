@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react';
-import { formatMoney, useExpenses } from '../../context/ExpenseContext';
+import { formatINR, useExpenses } from '../../context/ExpenseContext';
 import { EXPENSE_CATEGORIES, type Expense } from '../../types/spendsense';
 
 type SortOrder = 'latest' | 'oldest' | 'amount-high' | 'amount-low';
 
 const formatDate = (value: string): string =>
-  new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  new Date(value).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric' });
 
 export function TransactionsTable() {
   const { expenses } = useExpenses();
@@ -80,7 +80,7 @@ export function TransactionsTable() {
                 <td className="py-3 pr-4 font-medium text-slate-900">{expense.note}</td>
                 <td className="py-3 pr-4 text-slate-600">{expense.category}</td>
                 <td className="py-3 text-right font-semibold text-slate-900">
-                  {formatMoney(expense.amount)}
+                  {formatINR(expense.amount)}
                 </td>
               </tr>
             ))}

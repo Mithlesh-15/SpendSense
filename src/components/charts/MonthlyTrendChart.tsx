@@ -1,4 +1,5 @@
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { formatINR } from '../../context/ExpenseContext';
 import type { MonthlyPoint } from '../../types/spendsense';
 
 interface MonthlyTrendChartProps {
@@ -14,8 +15,8 @@ export function MonthlyTrendChart({ data }: MonthlyTrendChartProps) {
           <BarChart data={data}>
             <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
             <XAxis dataKey="month" tick={{ fill: '#475569', fontSize: 12 }} />
-            <YAxis tick={{ fill: '#475569', fontSize: 12 }} />
-            <Tooltip formatter={(value: number) => `$${value.toFixed(2)}`} />
+            <YAxis tick={{ fill: '#475569', fontSize: 12 }} tickFormatter={(value: number) => formatINR(value)} />
+            <Tooltip formatter={(value: number) => formatINR(value)} />
             <Bar dataKey="total" fill="#0EA5E9" radius={[8, 8, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>

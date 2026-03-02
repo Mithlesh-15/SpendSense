@@ -53,13 +53,18 @@ export function AddExpenseForm() {
       <div className="mt-4 space-y-4">
         <div>
           <label className="block text-sm font-medium text-slate-700">Amount</label>
-          <input
-            type="number"
-            value={amount}
-            onChange={(event) => setAmount(event.target.value)}
-            placeholder="0.00"
-            className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100"
-          />
+          <div className="relative mt-1">
+            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-500">
+              ₹
+            </span>
+            <input
+              type="number"
+              value={amount}
+              onChange={(event) => setAmount(event.target.value)}
+              placeholder="0"
+              className="w-full rounded-xl border border-slate-300 py-2 pl-7 pr-3 text-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100"
+            />
+          </div>
           {errors.amount && <p className="mt-1 text-xs text-rose-600">{errors.amount}</p>}
         </div>
 
