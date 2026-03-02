@@ -1,130 +1,90 @@
-# RunAnywhere Web Starter App
+# SpendSense
 
-A minimal React + TypeScript starter app demonstrating **on-device AI in the browser** using the [`@runanywhere/web`](https://www.npmjs.com/package/@runanywhere/web) SDK. All inference runs locally via WebAssembly — no server, no API key, 100% private.
+Privacy-first offline expense insights app for the RunAnywhere GPT Challenge.
+
+## Stack
+
+- React + Vite + TypeScript
+- Tailwind CSS
+- React Router
+- Recharts
+- Local state + localStorage (no backend)
 
 ## Features
 
-| Tab | What it does |
-|-----|-------------|
-| **Chat** | Stream text from an on-device LLM (LFM2 350M) |
-| **Vision** | Point your camera and describe what the VLM sees (LFM2-VL 450M) |
-| **Voice** | Speak naturally — VAD detects speech, STT transcribes, LLM responds, TTS speaks back |
+- Dashboard with:
+- Total Spent This Month
+- Last Month Spend
+- Difference card with increase/decrease color signal
+- Category pie chart
+- Monthly trend chart
+- Local AI insights panel (mock, RunAnywhere-ready)
+- Floating `+ Add Expense` button
+- Add Expense page with validation
+- Upload & Analyze page with drag-and-drop, preview, and mock extraction
+- Transactions page with category filter and sorting
+- Settings page with local privacy info, clear data, and export data
+- Bottom mobile navigation across all pages
 
-## Quick Start
+## Tailwind Setup
+
+The project already includes:
+
+- [`tailwind.config.cjs`](/d:/project/HackThon/SpendSense/tailwind.config.cjs)
+- [`postcss.config.cjs`](/d:/project/HackThon/SpendSense/postcss.config.cjs)
+- Tailwind directives in [`src/styles/index.css`](/d:/project/HackThon/SpendSense/src/styles/index.css)
+
+To run:
 
 ```bash
 npm install
 npm run dev
 ```
 
-Open [http://localhost:5173](http://localhost:5173). Models are downloaded on first use and cached in the browser's Origin Private File System (OPFS).
-
-## How It Works
-
-```
-@runanywhere/web (npm package)
-  ├── WASM engine (llama.cpp, whisper.cpp, sherpa-onnx)
-  ├── Model management (download, OPFS cache, load/unload)
-  └── TypeScript API (TextGeneration, STT, TTS, VAD, VLM, VoicePipeline)
-```
-
-The app imports everything from `@runanywhere/web`:
-
-```typescript
-import { RunAnywhere, SDKEnvironment } from '@runanywhere/web';
-import { TextGeneration, VLMWorkerBridge } from '@runanywhere/web-llamacpp';
-
-await RunAnywhere.initialize({ environment: SDKEnvironment.Development });
-
-// Stream LLM text
-const { stream } = await TextGeneration.generateStream('Hello!', { maxTokens: 200 });
-for await (const token of stream) { console.log(token); }
-
-// VLM: describe an image
-const result = await VLMWorkerBridge.shared.process(rgbPixels, width, height, 'Describe this.');
-```
-
 ## Project Structure
 
-```
+```text
 src/
-├── main.tsx              # React root
-├── App.tsx               # Tab navigation (Chat | Vision | Voice)
-├── runanywhere.ts        # SDK init + model catalog + VLM worker
-├── workers/
-│   └── vlm-worker.ts     # VLM Web Worker entry (2 lines)
-├── hooks/
-│   └── useModelLoader.ts # Shared model download/load hook
-├── components/
-│   ├── ChatTab.tsx        # LLM streaming chat
-│   ├── VisionTab.tsx      # Camera + VLM inference
-│   ├── VoiceTab.tsx       # Full voice pipeline
-│   └── ModelBanner.tsx    # Download progress UI
-└── styles/
-    └── index.css          # Dark theme CSS
+  App.tsx
+  main.tsx
+  styles/
+    index.css
+  types/
+    spendsense.ts
+  data/
+    mockData.ts
+  context/
+    ExpenseContext.tsx
+  services/
+    localAi.ts
+  pages/
+    DashboardPage.tsx
+    AddExpensePage.tsx
+    UploadAnalyzePage.tsx
+    TransactionsPage.tsx
+    SettingsPage.tsx
+  components/
+    layout/
+      AppShell.tsx
+    charts/
+      CategoryPieChart.tsx
+      MonthlyTrendChart.tsx
+    dashboard/
+      SummaryCards.tsx
+      AIInsightsPanel.tsx
+    forms/
+      AddExpenseForm.tsx
+    upload/
+      UploadAnalyzer.tsx
+    transactions/
+      TransactionsTable.tsx
+    settings/
+      SettingsPanel.tsx
+    FloatingAddButton.tsx
 ```
 
-## Adding Your Own Models
+## Offline Behavior
 
-Edit the `MODELS` array in `src/runanywhere.ts`:
-
-```typescript
-{
-  id: 'my-custom-model',
-  name: 'My Model',
-  repo: 'username/repo-name',           // HuggingFace repo
-  files: ['model.Q4_K_M.gguf'],         // Files to download
-  framework: LLMFramework.LlamaCpp,
-  modality: ModelCategory.Language,      // or Multimodal, SpeechRecognition, etc.
-  memoryRequirement: 500_000_000,        // Bytes
-}
-```
-
-Any GGUF model compatible with llama.cpp works for LLM/VLM. STT/TTS/VAD use sherpa-onnx models.
-
-## Deployment
-
-### Vercel
-
-```bash
-npm run build
-npx vercel --prod
-```
-
-The included `vercel.json` sets the required Cross-Origin-Isolation headers.
-
-### Netlify
-
-Add a `_headers` file:
-
-```
-/*
-  Cross-Origin-Opener-Policy: same-origin
-  Cross-Origin-Embedder-Policy: credentialless
-```
-
-### Any static host
-
-Serve the `dist/` folder with these HTTP headers on all responses:
-
-```
-Cross-Origin-Opener-Policy: same-origin
-Cross-Origin-Embedder-Policy: credentialless
-```
-
-## Browser Requirements
-
-- Chrome 96+ or Edge 96+ (recommended: 120+)
-- WebAssembly (required)
-- SharedArrayBuffer (requires Cross-Origin Isolation headers)
-- OPFS (for persistent model cache)
-
-## Documentation
-
-- [SDK API Reference](https://docs.runanywhere.ai)
-- [npm package](https://www.npmjs.com/package/@runanywhere/web)
-- [GitHub](https://github.com/RunanywhereAI/runanywhere-sdks)
-
-## License
-
-MIT
+- Expense data is persisted to browser localStorage.
+- No authentication, no backend calls, no cloud dependencies.
+- Mock local analysis service lives in [`src/services/localAi.ts`](/d:/project/HackThon/SpendSense/src/services/localAi.ts) and is designed to be replaced by RunAnywhere SDK integration later.

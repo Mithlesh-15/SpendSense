@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import tailwind from 'tailwindcss'
 
 const __dir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -60,7 +61,7 @@ function copyWasmPlugin(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [react(), copyWasmPlugin()],
+  plugins: [react(), copyWasmPlugin(),tailwind()],
   server: {
     headers: {
       // Cross-Origin Isolation — required for SharedArrayBuffer / multi-threaded WASM.
