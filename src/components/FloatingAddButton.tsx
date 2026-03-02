@@ -77,7 +77,7 @@ export function FloatingAddButton() {
           type="button"
           aria-label="Close action menu"
           onClick={() => setOpen(false)}
-          className="pointer-events-auto fixed inset-0 z-30 bg-slate-900/5 backdrop-blur-[1px]"
+          className="pointer-events-auto fixed inset-0 z-30 bg-slate-900/5 backdrop-blur-[1px] dark:bg-black/20"
         />
       )}
 
@@ -104,15 +104,15 @@ export function FloatingAddButton() {
               role="menuitem"
               onClick={() => onSelect(action.path)}
               onKeyDown={(event) => onActionKeyDown(event, index)}
-              className="w-56 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-left shadow-fintech transition hover:border-sky-200 hover:bg-sky-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+              className="w-56 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-left shadow-fintech transition hover:border-sky-200 hover:bg-sky-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-sky-700 dark:hover:bg-slate-800"
             >
               <div className="flex items-center gap-3">
-                <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-lg">
+                <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-lg dark:bg-slate-800">
                   {action.icon}
                 </span>
                 <div>
-                  <p className="text-sm font-semibold text-slate-900">{action.label}</p>
-                  <p className="text-xs text-slate-500">{action.description}</p>
+                  <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">{action.label}</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">{action.description}</p>
                 </div>
               </div>
             </button>

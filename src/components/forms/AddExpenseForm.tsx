@@ -46,15 +46,20 @@ export function AddExpenseForm() {
   };
 
   return (
-    <form onSubmit={onSubmit} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-      <h2 className="text-lg font-semibold text-slate-900">Add Expense</h2>
-      <p className="mt-1 text-sm text-slate-500">Save new spending entries directly on this device.</p>
+    <form
+      onSubmit={onSubmit}
+      className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition-colors duration-300 dark:border-slate-700 dark:bg-slate-900"
+    >
+      <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Add Expense</h2>
+      <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+        Save new spending entries directly on this device.
+      </p>
 
       <div className="mt-4 space-y-4">
         <div>
-          <label className="block text-sm font-medium text-slate-700">Amount</label>
+          <label className="block text-sm font-medium text-slate-700 dark:text-slate-200">Amount</label>
           <div className="relative mt-1">
-            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-500">
+            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-500 dark:text-slate-400">
               ₹
             </span>
             <input
@@ -62,18 +67,18 @@ export function AddExpenseForm() {
               value={amount}
               onChange={(event) => setAmount(event.target.value)}
               placeholder="0"
-              className="w-full rounded-xl border border-slate-300 py-2 pl-7 pr-3 text-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100"
+              className="w-full rounded-xl border border-slate-300 py-2 pl-7 pr-3 text-sm transition-colors focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-sky-400 dark:focus:ring-sky-900/50"
             />
           </div>
           {errors.amount && <p className="mt-1 text-xs text-rose-600">{errors.amount}</p>}
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-slate-700">Category</label>
+          <label className="block text-sm font-medium text-slate-700 dark:text-slate-200">Category</label>
           <select
             value={category}
             onChange={(event) => setCategory(event.target.value as ExpenseCategory)}
-            className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100"
+            className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm transition-colors focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-sky-400 dark:focus:ring-sky-900/50"
           >
             <option value="">Select category</option>
             {EXPENSE_CATEGORIES.map((item) => (
@@ -86,24 +91,24 @@ export function AddExpenseForm() {
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-slate-700">Note / Merchant</label>
+          <label className="block text-sm font-medium text-slate-700 dark:text-slate-200">Note / Merchant</label>
           <input
             type="text"
             value={note}
             onChange={(event) => setNote(event.target.value)}
             placeholder="Coffee shop, groceries, ride fare..."
-            className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100"
+            className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm transition-colors focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-sky-400 dark:focus:ring-sky-900/50"
           />
           {errors.note && <p className="mt-1 text-xs text-rose-600">{errors.note}</p>}
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-slate-700">Date</label>
+          <label className="block text-sm font-medium text-slate-700 dark:text-slate-200">Date</label>
           <input
             type="date"
             value={date}
             onChange={(event) => setDate(event.target.value)}
-            className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100"
+            className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm transition-colors focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-sky-400 dark:focus:ring-sky-900/50"
           />
         </div>
 

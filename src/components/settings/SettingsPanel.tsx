@@ -24,15 +24,15 @@ export function SettingsPanel() {
 
   return (
     <section className="space-y-4">
-      <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <h2 className="text-lg font-semibold text-slate-900">Privacy</h2>
-        <p className="mt-1 text-sm text-slate-600">
+      <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition-colors duration-300 dark:border-slate-700 dark:bg-slate-900">
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Privacy</h2>
+        <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
           All data is stored locally in your browser storage. Nothing is sent to a server.
         </p>
       </article>
 
-      <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <h2 className="text-lg font-semibold text-slate-900">Data Controls</h2>
+      <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition-colors duration-300 dark:border-slate-700 dark:bg-slate-900">
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Data Controls</h2>
         <div className="mt-3 flex flex-wrap gap-3">
           <button
             type="button"
@@ -49,7 +49,7 @@ export function SettingsPanel() {
             Export Data
           </button>
         </div>
-        {message && <p className="mt-3 text-sm text-emerald-700">{message}</p>}
+        {message && <p className="mt-3 text-sm text-emerald-700 dark:text-emerald-300">{message}</p>}
       </article>
     </section>
   );
