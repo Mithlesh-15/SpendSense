@@ -5,6 +5,7 @@ import { AIInsightsPanel } from '../components/dashboard/AIInsightsPanel';
 import { SummaryCards } from '../components/dashboard/SummaryCards';
 import { FloatingAddButton } from '../components/FloatingAddButton';
 import { useExpenses } from '../context/ExpenseContext';
+import { useModelReadiness } from '../context/ModelReadinessContext';
 import { analyzeSpendingWithLocalLLM } from '../services/spendingAnalysis';
 
 export function DashboardPage() {
@@ -21,6 +22,7 @@ export function DashboardPage() {
   const [aiInsights, setAiInsights] = useState<string[]>(insights);
   const [loadingAnalysis, setLoadingAnalysis] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const llm = useModelReadiness();
 
   const categoryBreakdown = useMemo(
     () =>
@@ -41,6 +43,13 @@ export function DashboardPage() {
   }, [insights]);
 
   const handleAnalyzeSpending = async () => {
+    if (!llm.ready) {
+      setAnalysisError(
+        llm.error ??
+          'On-device language model is not ready yet. Wait for initialization or retry model setup.',
+      );
+      return;
+    }
     setLoadingAnalysis(true);
     setAnalysisError(null);
     try {
@@ -49,7 +58,7 @@ export function DashboardPage() {
         totalLastMonth: lastMonthTotal,
         topCategory,
         categoryBreakdown,
-      });
+      }, { skipModelEnsure: true });
       setAiInsights(generated);
     } catch (error) {
       setAnalysisError(
@@ -86,6 +95,11 @@ export function DashboardPage() {
         loading={loadingAnalysis}
         error={analysisError}
         onAnalyze={handleAnalyzeSpending}
+        modelReady={llm.ready}
+        modelState={llm.state}
+        modelProgress={llm.progress}
+        modelError={llm.error}
+        onRetryModel={llm.retry}
       />
       <FloatingAddButton />
     </section>

@@ -3,9 +3,26 @@ interface AIInsightsPanelProps {
   onAnalyze: () => Promise<void> | void;
   loading: boolean;
   error: string | null;
+  modelReady: boolean;
+  modelState: string;
+  modelProgress: number;
+  modelError: string | null;
+  onRetryModel: () => Promise<void> | void;
 }
 
-export function AIInsightsPanel({ insights, onAnalyze, loading, error }: AIInsightsPanelProps) {
+export function AIInsightsPanel({
+  insights,
+  onAnalyze,
+  loading,
+  error,
+  modelReady,
+  modelState,
+  modelProgress,
+  modelError,
+  onRetryModel,
+}: AIInsightsPanelProps) {
+  const isAnalyzeDisabled = loading || !modelReady;
+
   return (
     <section className="rounded-2xl border border-sky-200 bg-gradient-to-br from-sky-50 to-emerald-50 p-4 shadow-sm transition-colors duration-300 dark:border-sky-900/70 dark:from-slate-900 dark:to-slate-800">
       <div className="flex items-center justify-between">
@@ -21,12 +38,30 @@ export function AIInsightsPanel({ insights, onAnalyze, loading, error }: AIInsig
         <button
           type="button"
           onClick={onAnalyze}
-          disabled={loading}
+          disabled={isAnalyzeDisabled}
           className="rounded-xl bg-sky-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-400"
         >
-          {loading ? 'Analyzing...' : 'Analyze My Spending'}
+          {loading ? 'Analyzing...' : modelReady ? 'Analyze My Spending' : 'Model Preparing...'}
         </button>
       </div>
+      {!modelReady && (
+        <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200">
+          <p>
+            {modelError
+              ? modelError
+              : `On-device model ${modelState}${modelState === 'downloading' ? ` (${Math.round(
+                  modelProgress * 100,
+                )}%)` : ''}.`}
+          </p>
+          <button
+            type="button"
+            onClick={onRetryModel}
+            className="mt-2 rounded-lg bg-amber-600 px-2 py-1 font-semibold text-white transition hover:bg-amber-700"
+          >
+            Retry Model Setup
+          </button>
+        </div>
+      )}
       {error && (
         <p className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-300">
           {error}

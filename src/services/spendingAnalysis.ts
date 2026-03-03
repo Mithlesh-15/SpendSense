@@ -1,6 +1,6 @@
 import { ModelCategory } from '@runanywhere/web';
 import { TextGeneration } from '@runanywhere/web-llamacpp';
-import { ModelManager, initSDK } from '../runanywhere';
+import { ModelManager, initSDK, getAccelerationMode } from '../runanywhere';
 
 export interface SpendingSummary {
   totalThisMonth: number;
@@ -11,6 +11,15 @@ export interface SpendingSummary {
 
 interface AnalyzeOptions {
   maxInsights?: number;
+  skipModelEnsure?: boolean;
+}
+
+export interface LanguageModelDiagnostics {
+  modelId: string;
+  modelStatus: string;
+  loadedModelId: string | null;
+  online: boolean;
+  accelerationMode: string | null;
 }
 
 const DEFAULT_MAX_INSIGHTS = 4;
@@ -44,7 +53,7 @@ const buildPrompt = (summary: SpendingSummary, maxInsights: number): string => {
   ].join('\n');
 };
 
-const ensureLanguageModelReady = async () => {
+export const ensureLanguageModelReady = async (): Promise<LanguageModelDiagnostics> => {
   await initSDK();
 
   const languageModels = ModelManager.getModels().filter((model) => model.modality === ModelCategory.Language);
@@ -53,7 +62,13 @@ const ensureLanguageModelReady = async () => {
     throw new Error('No on-device language model is registered.');
   }
 
+  const online = typeof navigator !== 'undefined' ? navigator.onLine : true;
   if (model.status !== 'downloaded' && model.status !== 'loaded') {
+    if (!online) {
+      throw new Error(
+        'Language model is not cached yet. Go online once to download it for offline use.',
+      );
+    }
     await ModelManager.downloadModel(model.id);
   }
 
@@ -63,6 +78,15 @@ const ensureLanguageModelReady = async () => {
       throw new Error('Failed to load on-device language model.');
     }
   }
+
+  const loadedModel = ModelManager.getLoadedModel(ModelCategory.Language);
+  return {
+    modelId: model.id,
+    modelStatus: model.status,
+    loadedModelId: loadedModel?.id ?? null,
+    online,
+    accelerationMode: getAccelerationMode(),
+  };
 };
 
 const parseBullets = (rawText: string, maxInsights: number): string[] => {
@@ -84,7 +108,9 @@ export async function analyzeSpendingWithLocalLLM(
   options: AnalyzeOptions = {},
 ): Promise<string[]> {
   const maxInsights = options.maxInsights ?? DEFAULT_MAX_INSIGHTS;
-  await ensureLanguageModelReady();
+  if (!options.skipModelEnsure) {
+    await ensureLanguageModelReady();
+  }
 
   const prompt = buildPrompt(summary, maxInsights);
   const result = await TextGeneration.generate(prompt, {
