@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { CategoryPieChart } from '../components/charts/CategoryPieChart';
 import { MonthlyTrendChart } from '../components/charts/MonthlyTrendChart';
 import { AIInsightsPanel } from '../components/dashboard/AIInsightsPanel';
@@ -15,6 +15,8 @@ export function DashboardPage() {
     categoryData,
     monthlyTrend,
     insights,
+    isLoading,
+    storageError,
   } = useExpenses();
   const [aiInsights, setAiInsights] = useState<string[]>(insights);
   const [loadingAnalysis, setLoadingAnalysis] = useState(false);
@@ -33,6 +35,10 @@ export function DashboardPage() {
     const ranked = [...categoryData].sort((a, b) => b.value - a.value);
     return ranked[0]?.name ?? 'Others';
   }, [categoryData]);
+
+  useEffect(() => {
+    setAiInsights(insights);
+  }, [insights]);
 
   const handleAnalyzeSpending = async () => {
     setLoadingAnalysis(true);
@@ -58,6 +64,16 @@ export function DashboardPage() {
 
   return (
     <section className="space-y-4">
+      {storageError && (
+        <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-300">
+          {storageError}
+        </p>
+      )}
+      {isLoading && (
+        <p className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+          Loading local expenses...
+        </p>
+      )}
       <SummaryCards
         thisMonthTotal={thisMonthTotal}
         lastMonthTotal={lastMonthTotal}

@@ -13,16 +13,20 @@ const today = new Date().toISOString().slice(0, 10);
 
 export function AddExpenseForm() {
   const navigate = useNavigate();
-  const { addExpense } = useExpenses();
+  const { addExpense, storageError } = useExpenses();
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState<ExpenseCategory | ''>('');
   const [note, setNote] = useState('');
   const [date, setDate] = useState(today);
   const [errors, setErrors] = useState<FormErrors>({});
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
-  const onSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (submitting) return;
     const nextErrors: FormErrors = {};
+    setSubmitError(null);
 
     const amountValue = Number(amount);
     if (!amount || Number.isNaN(amountValue) || amountValue <= 0) {
@@ -35,14 +39,20 @@ export function AddExpenseForm() {
     if (Object.keys(nextErrors).length > 0) return;
 
     const safeCategory = category as ExpenseCategory;
-    addExpense({
-      amount: amountValue,
-      category: safeCategory,
-      note,
-      date,
-    });
-
-    navigate('/');
+    setSubmitting(true);
+    try {
+      await addExpense({
+        amount: amountValue,
+        category: safeCategory,
+        note,
+        date,
+      });
+      navigate('/');
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : 'Could not save expense.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -54,6 +64,11 @@ export function AddExpenseForm() {
       <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
         Save new spending entries directly on this device.
       </p>
+      {(submitError || storageError) && (
+        <p className="mt-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-300">
+          {submitError ?? storageError}
+        </p>
+      )}
 
       <div className="mt-4 space-y-4">
         <div>
@@ -114,9 +129,10 @@ export function AddExpenseForm() {
 
         <button
           type="submit"
-          className="w-full rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-sky-700"
+          disabled={submitting}
+          className="w-full rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-400"
         >
-          Save Expense
+          {submitting ? 'Saving...' : 'Save Expense'}
         </button>
       </div>
     </form>

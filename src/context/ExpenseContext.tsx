@@ -2,11 +2,11 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
 } from 'react';
-import { mockExpenses } from '../data/mockData';
 import {
   EXPENSE_CATEGORIES,
   type AddExpenseInput,
@@ -14,6 +14,7 @@ import {
   type Expense,
   type MonthlyPoint,
 } from '../types/spendsense';
+import { storageService } from '../services/storageService';
 
 interface ExpenseContextValue {
   expenses: Expense[];
@@ -23,12 +24,13 @@ interface ExpenseContextValue {
   categoryData: CategoryPoint[];
   monthlyTrend: MonthlyPoint[];
   insights: string[];
-  addExpense: (input: AddExpenseInput) => void;
-  clearData: () => void;
+  isLoading: boolean;
+  storageError: string | null;
+  addExpense: (input: AddExpenseInput) => Promise<void>;
+  clearData: () => Promise<void>;
   exportData: () => string;
 }
 
-const STORAGE_KEY = 'spendsense-local-expenses';
 const ExpenseContext = createContext<ExpenseContextValue | null>(null);
 
 const currency = new Intl.NumberFormat('en-IN', {
@@ -48,43 +50,56 @@ const toMonthTotal = (items: Expense[], targetMonth: string): number =>
     .filter((expense) => monthId(new Date(expense.date)) === targetMonth)
     .reduce((sum, expense) => sum + expense.amount, 0);
 
-const loadInitial = (): Expense[] => {
-  const stored = localStorage.getItem(STORAGE_KEY);
-  if (!stored) return mockExpenses;
-
-  try {
-    const parsed = JSON.parse(stored) as Expense[];
-    return parsed.length ? parsed : mockExpenses;
-  } catch {
-    return mockExpenses;
-  }
-};
-
 export function ExpenseProvider({ children }: { children: ReactNode }) {
-  const [expenses, setExpenses] = useState<Expense[]>(loadInitial);
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [storageError, setStorageError] = useState<string | null>(null);
 
-  const persist = useCallback((next: Expense[]) => {
-    setExpenses(next);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  const loadExpenses = useCallback(async () => {
+    setIsLoading(true);
+    setStorageError(null);
+    try {
+      const loaded = await storageService.getExpenses();
+      setExpenses(loaded);
+    } catch (error) {
+      setStorageError(
+        error instanceof Error ? error.message : 'Failed to load local expense data.',
+      );
+      setExpenses([]);
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
 
-  const addExpense = useCallback(
-    (input: AddExpenseInput) => {
-      const next: Expense = {
-        id: `exp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        amount: input.amount,
-        category: input.category,
-        note: input.note.trim(),
-        date: input.date,
-      };
-      persist([next, ...expenses]);
-    },
-    [expenses, persist],
-  );
+  useEffect(() => {
+    void loadExpenses();
+  }, [loadExpenses]);
 
-  const clearData = useCallback(() => {
-    persist([]);
-  }, [persist]);
+  const addExpense = useCallback(async (input: AddExpenseInput) => {
+    setStorageError(null);
+    try {
+      const saved = await storageService.addExpense(input);
+      setExpenses((prev) =>
+        [saved, ...prev].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to save expense locally.';
+      setStorageError(message);
+      throw new Error(message);
+    }
+  }, []);
+
+  const clearData = useCallback(async () => {
+    setStorageError(null);
+    try {
+      await storageService.clearExpenses();
+      setExpenses([]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to clear local data.';
+      setStorageError(message);
+      throw new Error(message);
+    }
+  }, []);
 
   const exportData = useCallback(() => JSON.stringify(expenses, null, 2), [expenses]);
 
@@ -119,18 +134,20 @@ export function ExpenseProvider({ children }: { children: ReactNode }) {
     });
 
     const topCategory = [...categoryData].sort((a, b) => b.value - a.value)[0];
-    const foodTotal = categoryData.find((point) => point.name === 'Food')?.value ?? 0;
-    const foodShare = thisMonthTotal ? Math.round((foodTotal / thisMonthTotal) * 100) : 0;
     const changePct = lastMonthTotal
       ? Math.round((Math.abs(difference) / lastMonthTotal) * 100)
       : 0;
 
     const insights = [
-      `Food spending is ${foodShare}% of this month spend.`,
-      `${topCategory?.name ?? 'Food'} is your largest expense category this month.`,
+      expenses.length === 0
+        ? 'Add your first expense to unlock personalized spending insights.'
+        : `${topCategory?.name ?? 'Others'} is your largest expense category this month.`,
       difference >= 0
         ? `Spending increased by ${changePct}% compared to last month.`
         : `Spending decreased by ${changePct}% compared to last month.`,
+      thisMonthTotal === 0
+        ? 'No expenses recorded this month yet.'
+        : `Total spend this month is ${formatINR(thisMonthTotal)}.`,
     ];
 
     return {
@@ -151,6 +168,8 @@ export function ExpenseProvider({ children }: { children: ReactNode }) {
     categoryData: analytics.categoryData,
     monthlyTrend: analytics.monthlyTrend,
     insights: analytics.insights,
+    isLoading,
+    storageError,
     addExpense,
     clearData,
     exportData,

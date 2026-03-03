@@ -2,12 +2,19 @@ import { useState } from 'react';
 import { useExpenses } from '../../context/ExpenseContext';
 
 export function SettingsPanel() {
-  const { clearData, exportData } = useExpenses();
+  const { clearData, exportData, storageError } = useExpenses();
   const [message, setMessage] = useState<string>('');
+  const [busy, setBusy] = useState(false);
 
-  const onClear = () => {
-    clearData();
-    setMessage('Local data cleared.');
+  const onClear = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await clearData();
+      setMessage('Local data cleared.');
+    } finally {
+      setBusy(false);
+    }
   };
 
   const onExport = () => {
@@ -37,9 +44,10 @@ export function SettingsPanel() {
           <button
             type="button"
             onClick={onClear}
-            className="rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-700"
+            disabled={busy}
+            className="rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:bg-slate-500"
           >
-            Clear Data
+            {busy ? 'Clearing...' : 'Clear Data'}
           </button>
           <button
             type="button"
@@ -50,6 +58,9 @@ export function SettingsPanel() {
           </button>
         </div>
         {message && <p className="mt-3 text-sm text-emerald-700 dark:text-emerald-300">{message}</p>}
+        {storageError && (
+          <p className="mt-3 text-sm text-rose-700 dark:text-rose-300">{storageError}</p>
+        )}
       </article>
     </section>
   );
