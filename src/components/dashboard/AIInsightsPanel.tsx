@@ -10,6 +10,42 @@ interface AIInsightsPanelProps {
   onRetryModel: () => Promise<void> | void;
 }
 
+const parseInsights = (insights: string[]) => {
+  const sections: Array<{ title: string; items: string[] }> = [];
+  let currentSection: { title: string; items: string[] } | null = null;
+
+  for (const line of insights) {
+    // Check if this is a section header (all caps or ends with specific patterns)
+    const isSectionHeader = 
+      line === line.toUpperCase() && 
+      line.length > 3 && 
+      !line.startsWith('•') && 
+      !line.startsWith('-') &&
+      !line.startsWith('⚠');
+
+    if (isSectionHeader) {
+      // Start a new section
+      if (currentSection) {
+        sections.push(currentSection);
+      }
+      currentSection = { title: line, items: [] };
+    } else if (currentSection && line.trim()) {
+      // Add to current section
+      currentSection.items.push(line);
+    } else if (!currentSection && line.trim()) {
+      // Standalone item before any section
+      sections.push({ title: '', items: [line] });
+    }
+  }
+
+  // Add the last section
+  if (currentSection) {
+    sections.push(currentSection);
+  }
+
+  return sections;
+};
+
 export function AIInsightsPanel({
   insights,
   onAnalyze,
@@ -22,6 +58,7 @@ export function AIInsightsPanel({
   onRetryModel,
 }: AIInsightsPanelProps) {
   const isAnalyzeDisabled = loading || !modelReady;
+  const sections = parseInsights(insights);
 
   return (
     <section className="rounded-2xl border border-sky-200 bg-gradient-to-br from-sky-50 to-emerald-50 p-4 shadow-sm transition-colors duration-300 dark:border-sky-900/70 dark:from-slate-900 dark:to-slate-800">
@@ -67,13 +104,30 @@ export function AIInsightsPanel({
           {error}
         </p>
       )}
-      <ul className="mt-3 space-y-2">
-        {insights.map((insight) => (
-          <li key={insight} className="rounded-xl border border-white/80 bg-white/70 px-3 py-2 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-200">
-            • {insight}
-          </li>
+      <div className="mt-3 space-y-3">
+        {sections.map((section, sectionIndex) => (
+          <div
+            key={`${section.title}-${sectionIndex}`}
+            className="rounded-xl border border-white/80 bg-white/70 px-3 py-3 dark:border-slate-700 dark:bg-slate-900/70"
+          >
+            {section.title && (
+              <h4 className="mb-2 text-xs font-bold uppercase tracking-wide text-sky-700 dark:text-sky-400">
+                {section.title}
+              </h4>
+            )}
+            <div className="space-y-1">
+              {section.items.map((item, itemIndex) => (
+                <p
+                  key={`${item}-${itemIndex}`}
+                  className="text-sm text-slate-700 dark:text-slate-200"
+                >
+                  {item}
+                </p>
+              ))}
+            </div>
+          </div>
         ))}
-      </ul>
+      </div>
     </section>
   );
 }

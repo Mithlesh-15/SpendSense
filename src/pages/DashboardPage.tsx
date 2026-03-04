@@ -6,7 +6,8 @@ import { SummaryCards } from '../components/dashboard/SummaryCards';
 import { FloatingAddButton } from '../components/FloatingAddButton';
 import { useExpenses } from '../context/ExpenseContext';
 import { useModelReadiness } from '../context/ModelReadinessContext';
-import { analyzeSpendingWithLocalLLM } from '../services/spendingAnalysis';
+import { analyzeSpendingWithLocalLLM, type CategoryComparison } from '../services/spendingAnalysis';
+import { EXPENSE_CATEGORIES } from '../types/spendsense';
 
 export function DashboardPage() {
   const {
@@ -16,6 +17,7 @@ export function DashboardPage() {
     categoryData,
     monthlyTrend,
     insights,
+    expenses,
     isLoading,
     storageError,
   } = useExpenses();
@@ -24,19 +26,43 @@ export function DashboardPage() {
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const llm = useModelReadiness();
 
-  const categoryBreakdown = useMemo(
+  const currentMonthKey = useMemo(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  }, []);
+
+  const previousMonthKey = useMemo(() => {
+    const now = new Date();
+    const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    return `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}`;
+  }, []);
+
+  const toMonthKey = (isoDate: string) => {
+    const dt = new Date(isoDate);
+    return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`;
+  };
+
+  const categoryBreakdownThisMonth = useMemo(
     () =>
-      categoryData.reduce<Record<string, number>>((acc, item) => {
-        acc[item.name] = item.value;
+      EXPENSE_CATEGORIES.reduce<Record<string, number>>((acc, category) => {
+        acc[category] = expenses
+          .filter((expense) => expense.category === category && toMonthKey(expense.date) === currentMonthKey)
+          .reduce((sum, expense) => sum + expense.amount, 0);
         return acc;
       }, {}),
-    [categoryData],
+    [expenses, currentMonthKey],
   );
 
-  const topCategory = useMemo(() => {
-    const ranked = [...categoryData].sort((a, b) => b.value - a.value);
-    return ranked[0]?.name ?? 'Others';
-  }, [categoryData]);
+  const categoryBreakdownLastMonth = useMemo(
+    () =>
+      EXPENSE_CATEGORIES.reduce<Record<string, number>>((acc, category) => {
+        acc[category] = expenses
+          .filter((expense) => expense.category === category && toMonthKey(expense.date) === previousMonthKey)
+          .reduce((sum, expense) => sum + expense.amount, 0);
+        return acc;
+      }, {}),
+    [expenses, previousMonthKey],
+  );
 
   useEffect(() => {
     setAiInsights(insights);
@@ -53,11 +79,29 @@ export function DashboardPage() {
     setLoadingAnalysis(true);
     setAnalysisError(null);
     try {
+      // Compute category-wise comparisons with difference and percentage change
+      const categories: Record<string, CategoryComparison> = {};
+      
+      for (const category of EXPENSE_CATEGORIES) {
+        const lastMonth = categoryBreakdownLastMonth[category] ?? 0;
+        const thisMonth = categoryBreakdownThisMonth[category] ?? 0;
+        const difference = thisMonth - lastMonth;
+        const percentChange = lastMonth === 0 
+          ? (thisMonth > 0 ? 100 : 0) 
+          : Math.round((difference / lastMonth) * 100);
+        
+        categories[category] = {
+          lastMonth,
+          thisMonth,
+          difference,
+          percentChange,
+        };
+      }
+      
       const generated = await analyzeSpendingWithLocalLLM({
         totalThisMonth: thisMonthTotal,
         totalLastMonth: lastMonthTotal,
-        topCategory,
-        categoryBreakdown,
+        categories,
       }, { skipModelEnsure: true });
       setAiInsights(generated);
     } catch (error) {
