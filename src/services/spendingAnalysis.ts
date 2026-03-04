@@ -18,6 +18,7 @@ export interface SpendingSummary {
 
 interface AnalyzeOptions {
   skipModelEnsure?: boolean;
+  timeoutMs?: number;
 }
 
 export interface LanguageModelDiagnostics {
@@ -30,6 +31,7 @@ export interface LanguageModelDiagnostics {
 
 const inrNumber = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 });
 const formatINR = (amount: number) => `₹${inrNumber.format(Math.round(amount))}`;
+const DEFAULT_TIMEOUT_MS = 15_000;
 
 const toCategoryStats = (summary: SpendingSummary) =>
   EXPENSE_CATEGORIES.map((category) => {
@@ -55,46 +57,33 @@ const toCategoryStats = (summary: SpendingSummary) =>
   });
 
 const buildPrompt = (summary: SpendingSummary): string => {
-  const stats = toCategoryStats(summary);
-  
+  const compact = {
+    totalThisMonth: summary.totalThisMonth,
+    totalLastMonth: summary.totalLastMonth,
+    categories: toCategoryStats(summary).map((item) => ({
+      category: item.category,
+      lastMonth: item.lastMonth,
+      thisMonth: item.thisMonth,
+      difference: item.change,
+      percentChange: item.changePct,
+    })),
+  };
+
   return [
-    'You are a financial analysis assistant. Generate a detailed spending analysis using ONLY the provided JSON data.',
-    '',
-    'IMPORTANT RULES:',
-    '- Use exact categories from the data: Food, Shopping, Travel, Bills, Entertainment, Others',
-    '- Do not invent or assume any information',
-    '- Keep insights concise and analytical',
-    '- Focus on actionable recommendations',
-    '',
-    'OUTPUT FORMAT (use these exact section headers):',
-    '',
+    'Analyze the JSON and output concise structured lines.',
+    'Sections in exact order:',
     'CATEGORY-WISE COMPARISON',
-    'For each category with spending, format as:',
-    '[Category Name]',
-    '• Last month: ₹[amount]',
-    '• This month: ₹[amount]',
-    '• [Increased/Decreased] by ₹[amount] ([percent]%)',
-    '• Insight: [One short analytical sentence]',
-    '',
     'BIGGEST INCREASE CATEGORY',
-    'Identify the category with the largest increase:',
-    '• [Category] increased the most by ₹[amount] ([percent]%)',
-    '',
     'BIGGEST DECREASE CATEGORY',
-    'Identify the category with the largest decrease:',
-    '• [Category] decreased the most by ₹[amount] ([percent]%)',
-    '',
     'SAVINGS OPPORTUNITIES',
-    'Provide 1-2 realistic suggestions based on spending patterns:',
-    '• [Specific actionable recommendation based on data]',
-    '',
     'RISK ALERT',
-    'If any category increased more than 40%, show warning. Otherwise state no high-risk spikes:',
-    '⚠ Spending Alert',
-    '• [Category] increased by [percent]% compared to last month',
-    '',
-    'SPENDING DATA (JSON):',
-    JSON.stringify(summary, null, 2),
+    'Rules:',
+    '- Use only categories: Food, Shopping, Travel, Bills, Entertainment, Others.',
+    '- Category line format: "<Category>: Last ₹X | This ₹Y | Increased/Decreased ₹Z (P%) | Insight: ...".',
+    '- Add 1-2 actionable savings lines.',
+    '- Flag any category with >40% increase, else "No high-risk spikes detected."',
+    '- No disclaimers. No filler.',
+    `INPUT_JSON=${JSON.stringify(compact)}`,
   ].join('\n');
 };
 
@@ -104,53 +93,30 @@ const fallbackAnalysis = (summary: SpendingSummary): string[] => {
   const biggestDecrease = [...stats].sort((a, b) => a.change - b.change)[0];
   const risks = stats.filter((item) => item.risk);
 
-  const lines: string[] = ['CATEGORY-WISE COMPARISON', ''];
-  
-  // Add category comparisons
+  const lines: string[] = ['CATEGORY-WISE COMPARISON'];
   for (const item of stats.filter((s) => s.lastMonth > 0 || s.thisMonth > 0)) {
-    lines.push(`${item.category}`);
-    lines.push(`• Last month: ${formatINR(item.lastMonth)}`);
-    lines.push(`• This month: ${formatINR(item.thisMonth)}`);
     lines.push(
-      `• ${item.direction === 'increased' ? 'Increased' : 'Decreased'} by ${formatINR(item.changeAbs)} (${item.changePct}%)`,
+      `${item.category}: Last ${formatINR(item.lastMonth)} | This ${formatINR(item.thisMonth)} | ${item.direction === 'increased' ? 'Increased' : 'Decreased'} ${formatINR(item.changeAbs)} (${item.changePct}%) | Insight: ${item.direction === 'increased' ? 'Review controllable spend drivers.' : 'Category control improved this month.'}`,
     );
-    const insight = item.direction === 'increased' 
-      ? 'Review this category for controllable costs.' 
-      : 'Good control this month; maintain this trend.';
-    lines.push(`• Insight: ${insight}`);
-    lines.push('');
   }
-
   lines.push('BIGGEST INCREASE CATEGORY');
-  lines.push(`• ${biggestIncrease.category} increased the most by ${formatINR(Math.max(0, biggestIncrease.change))} (${biggestIncrease.changePct}%)`);
-  lines.push('');
-  
+  lines.push(
+    `${biggestIncrease.category} increased the most by ${formatINR(Math.max(0, biggestIncrease.change))} (${biggestIncrease.changePct}%).`,
+  );
   lines.push('BIGGEST DECREASE CATEGORY');
-  lines.push(`• ${biggestDecrease.category} decreased the most by ${formatINR(Math.abs(Math.min(0, biggestDecrease.change)))} (${biggestDecrease.changePct}%)`);
-  lines.push('');
-  
+  lines.push(
+    `${biggestDecrease.category} decreased the most by ${formatINR(Math.abs(Math.min(0, biggestDecrease.change)))} (${biggestDecrease.changePct}%).`,
+  );
   lines.push('SAVINGS OPPORTUNITIES');
-  if (biggestIncrease.change > 0) {
-    lines.push(`• Reducing ${biggestIncrease.category.toLowerCase()} spending could lower monthly expenses significantly.`);
-  }
-  if (biggestDecrease.change < 0) {
-    lines.push(`• ${biggestDecrease.category} expenses dropped this month — maintaining this trend could improve savings.`);
-  }
-  if (biggestIncrease.change <= 0 && biggestDecrease.change >= 0) {
-    lines.push('• Set category caps for high-growth areas and compare weekly against target.');
-  }
-  lines.push('');
-  
+  lines.push('Set weekly category caps for high-growth buckets and review every Sunday.');
+  lines.push('Shift variable discretionary spends to planned budgets to avoid mid-month spikes.');
   lines.push('RISK ALERT');
-  if (risks.length > 0) {
-    lines.push('⚠ Spending Alert');
-    for (const item of risks) {
-      lines.push(`• ${item.category} increased by ${item.changePct}% compared to last month.`);
-    }
-  } else {
-    lines.push('• No high-risk spikes detected.');
-  }
-  
+  lines.push(
+    risks.length > 0
+      ? `High spike detected: ${risks.map((item) => `${item.category} (${item.changePct}%)`).join(', ')}.`
+      : 'No high-risk spikes detected.',
+  );
+
   return lines;
 };
 
@@ -164,27 +130,19 @@ export const ensureLanguageModelReady = async (): Promise<LanguageModelDiagnosti
   }
 
   const online = typeof navigator !== 'undefined' ? navigator.onLine : true;
-  if (model.status !== 'downloaded' && model.status !== 'loaded') {
+  const ensured = await ModelManager.ensureLoaded(ModelCategory.Language, { coexist: true });
+  const loadedModel = ModelManager.getLoadedModel(ModelCategory.Language) ?? ensured;
+  if (!loadedModel) {
     if (!online) {
-      throw new Error(
-        'Language model is not cached yet. Go online once to download it for offline use.',
-      );
+      throw new Error('Language model is unavailable offline. Connect once to complete model download.');
     }
-    await ModelManager.downloadModel(model.id);
+    throw new Error('Failed to load on-device language model.');
   }
 
-  if (model.status !== 'loaded') {
-    const loaded = await ModelManager.loadModel(model.id, { coexist: true });
-    if (!loaded) {
-      throw new Error('Failed to load on-device language model.');
-    }
-  }
-
-  const loadedModel = ModelManager.getLoadedModel(ModelCategory.Language);
   return {
     modelId: model.id,
     modelStatus: model.status,
-    loadedModelId: loadedModel?.id ?? null,
+    loadedModelId: loadedModel.id,
     online,
     accelerationMode: getAccelerationMode(),
   };
@@ -197,9 +155,9 @@ const parseStructuredLines = (rawText: string): string[] =>
     .filter(Boolean)
     .map((line) => line.replace(/^\*\s*/, '').replace(/^\d+\.\s*/, ''));
 
-const hasAllCategories = (lines: string[]) =>
-  EXPENSE_CATEGORIES.every((category) =>
-    lines.some((line) => line.toLowerCase().includes(category.toLowerCase())),
+const hasCoreSections = (lines: string[]) =>
+  ['CATEGORY-WISE COMPARISON', 'BIGGEST INCREASE CATEGORY', 'BIGGEST DECREASE CATEGORY', 'SAVINGS OPPORTUNITIES', 'RISK ALERT'].every(
+    (section) => lines.some((line) => line.toUpperCase().includes(section)),
   );
 
 export async function analyzeSpendingWithLocalLLM(
@@ -210,18 +168,34 @@ export async function analyzeSpendingWithLocalLLM(
     await ensureLanguageModelReady();
   }
 
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const prompt = buildPrompt(summary);
-  const result = await TextGeneration.generate(prompt, {
-    maxTokens: 1200,
-    temperature: 0.3,
-    systemPrompt:
-      'You are SpendSense, a precise financial intelligence assistant. Generate structured, analytical insights based solely on provided data. Keep explanations concise and actionable.',
-  });
+  const startedAt = performance.now();
 
-  const lines = parseStructuredLines(result.text ?? '');
-  if (lines.length === 0 || !hasAllCategories(lines)) {
+  try {
+    const result = await Promise.race([
+      TextGeneration.generate(prompt, {
+        maxTokens: 360,
+        temperature: 0.15,
+        topP: 0.9,
+        systemPrompt:
+          'You are SpendSense local analyzer. Output compact structured sections only from provided data.',
+      }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Analysis timed out. Please retry.')), timeoutMs),
+      ),
+    ]);
+
+    console.info('[SpendSense][LLM] analysis latency(ms)', Math.round(performance.now() - startedAt));
+
+    const lines = parseStructuredLines(result.text ?? '');
+    if (lines.length === 0 || !hasCoreSections(lines)) {
+      console.warn('[SpendSense][LLM] invalid structure, using fallback formatter');
+      return fallbackAnalysis(summary);
+    }
+    return lines;
+  } catch (error) {
+    console.error('[SpendSense][LLM] inference failed, using fallback', error);
     return fallbackAnalysis(summary);
   }
-
-  return lines;
 }
