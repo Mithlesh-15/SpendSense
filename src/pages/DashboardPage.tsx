@@ -64,6 +64,26 @@ export function DashboardPage() {
     [expenses, previousMonthKey],
   );
 
+  const categoryComparisons = useMemo(() => {
+    const categories: Record<string, CategoryComparison> = {};
+    for (const category of EXPENSE_CATEGORIES) {
+      const lastMonth = categoryBreakdownLastMonth[category] ?? 0;
+      const thisMonth = categoryBreakdownThisMonth[category] ?? 0;
+      const difference = thisMonth - lastMonth;
+      const percentChange = lastMonth === 0
+        ? (thisMonth > 0 ? 100 : 0)
+        : Math.round((difference / lastMonth) * 100);
+
+      categories[category] = {
+        lastMonth,
+        thisMonth,
+        difference,
+        percentChange,
+      };
+    }
+    return categories;
+  }, [categoryBreakdownLastMonth, categoryBreakdownThisMonth]);
+
   useEffect(() => {
     setAiInsights(insights);
   }, [insights]);
@@ -79,29 +99,10 @@ export function DashboardPage() {
     setLoadingAnalysis(true);
     setAnalysisError(null);
     try {
-      // Compute category-wise comparisons with difference and percentage change
-      const categories: Record<string, CategoryComparison> = {};
-      
-      for (const category of EXPENSE_CATEGORIES) {
-        const lastMonth = categoryBreakdownLastMonth[category] ?? 0;
-        const thisMonth = categoryBreakdownThisMonth[category] ?? 0;
-        const difference = thisMonth - lastMonth;
-        const percentChange = lastMonth === 0 
-          ? (thisMonth > 0 ? 100 : 0) 
-          : Math.round((difference / lastMonth) * 100);
-        
-        categories[category] = {
-          lastMonth,
-          thisMonth,
-          difference,
-          percentChange,
-        };
-      }
-      
       const generated = await analyzeSpendingWithLocalLLM({
         totalThisMonth: thisMonthTotal,
         totalLastMonth: lastMonthTotal,
-        categories,
+        categories: categoryComparisons,
       }, { skipModelEnsure: true });
       setAiInsights(generated);
     } catch (error) {
@@ -136,6 +137,7 @@ export function DashboardPage() {
       <MonthlyTrendChart data={monthlyTrend} />
       <AIInsightsPanel
         insights={aiInsights}
+        comparisons={categoryComparisons}
         loading={loadingAnalysis}
         error={analysisError}
         onAnalyze={handleAnalyzeSpending}
