@@ -32,6 +32,7 @@ export interface LanguageModelDiagnostics {
 const inrNumber = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 });
 const formatINR = (amount: number) => `₹${inrNumber.format(Math.round(amount))}`;
 const DEFAULT_TIMEOUT_MS = 15_000;
+export const LOCAL_LLM_CACHE_KEY = 'spendsense-llm-ready';
 
 const toCategoryStats = (summary: SpendingSummary) =>
   EXPENSE_CATEGORIES.map((category) => {
@@ -130,14 +131,54 @@ export const ensureLanguageModelReady = async (): Promise<LanguageModelDiagnosti
   }
 
   const online = typeof navigator !== 'undefined' ? navigator.onLine : true;
+  const alreadyLoaded = ModelManager.getLoadedModel(ModelCategory.Language);
+  if (alreadyLoaded) {
+    return {
+      modelId: model.id,
+      modelStatus: model.status,
+      loadedModelId: alreadyLoaded.id,
+      online,
+      accelerationMode: getAccelerationMode(),
+    };
+  }
+
+  const cachedMetaRaw = localStorage.getItem(LOCAL_LLM_CACHE_KEY);
+  const cachedMeta = cachedMetaRaw
+    ? (JSON.parse(cachedMetaRaw) as { modelId: string; preparedAt: string })
+    : null;
+  const hasLocalMarker = cachedMeta?.modelId === model.id;
+
+  if (hasLocalMarker) {
+    const loadedFromLocal = await ModelManager.loadModel(model.id, { coexist: true });
+    if (loadedFromLocal) {
+      const loadedModel = ModelManager.getLoadedModel(ModelCategory.Language);
+      return {
+        modelId: model.id,
+        modelStatus: model.status,
+        loadedModelId: loadedModel?.id ?? model.id,
+        online,
+        accelerationMode: getAccelerationMode(),
+      };
+    }
+  }
+
+  if (!online && !hasLocalMarker) {
+    throw new Error('AI model is preparing. Please stay online for the first initialization.');
+  }
+
   const ensured = await ModelManager.ensureLoaded(ModelCategory.Language, { coexist: true });
   const loadedModel = ModelManager.getLoadedModel(ModelCategory.Language) ?? ensured;
   if (!loadedModel) {
     if (!online) {
-      throw new Error('Language model is unavailable offline. Connect once to complete model download.');
+      throw new Error('AI model is preparing. Please stay online for the first initialization.');
     }
     throw new Error('Failed to load on-device language model.');
   }
+
+  localStorage.setItem(
+    LOCAL_LLM_CACHE_KEY,
+    JSON.stringify({ modelId: model.id, preparedAt: new Date().toISOString() }),
+  );
 
   return {
     modelId: model.id,

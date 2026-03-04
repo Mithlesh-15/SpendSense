@@ -1,6 +1,10 @@
 import { EventBus, ModelCategory, ModelManager } from '@runanywhere/web';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ensureLanguageModelReady, type LanguageModelDiagnostics } from '../services/spendingAnalysis';
+import {
+  ensureLanguageModelReady,
+  LOCAL_LLM_CACHE_KEY,
+  type LanguageModelDiagnostics,
+} from '../services/spendingAnalysis';
 
 export type LLMModelState = 'initializing' | 'downloading' | 'loading' | 'ready' | 'error';
 
@@ -13,11 +17,9 @@ export interface LLMModelStatus {
   retry: () => Promise<void>;
 }
 
-const LOCAL_MODEL_KEY = 'spendsense-llm-ready';
-
 const getLocalModelMarker = (): { modelId: string; preparedAt: string } | null => {
   try {
-    const raw = localStorage.getItem(LOCAL_MODEL_KEY);
+    const raw = localStorage.getItem(LOCAL_LLM_CACHE_KEY);
     if (!raw) return null;
     return JSON.parse(raw) as { modelId: string; preparedAt: string };
   } catch {
@@ -59,7 +61,7 @@ export function useLLMModel(): LLMModelStatus {
       setProgress(1);
       setState('ready');
       localStorage.setItem(
-        LOCAL_MODEL_KEY,
+        LOCAL_LLM_CACHE_KEY,
         JSON.stringify({ modelId: diag.modelId, preparedAt: new Date().toISOString() }),
       );
       console.info('[SpendSense][LLM] ready', diag);
