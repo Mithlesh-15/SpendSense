@@ -24,6 +24,7 @@ export function DashboardPage() {
   const [aiInsights, setAiInsights] = useState<string[]>(insights);
   const [loadingAnalysis, setLoadingAnalysis] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [analyzeTriggered, setAnalyzeTriggered] = useState(false);
   const llm = useModelReadiness();
 
   const currentMonthKey = useMemo(() => {
@@ -85,10 +86,14 @@ export function DashboardPage() {
   }, [categoryBreakdownLastMonth, categoryBreakdownThisMonth]);
 
   useEffect(() => {
-    setAiInsights(insights);
-  }, [insights]);
+    if (!analyzeTriggered) {
+      setAiInsights([]);
+      setAnalysisError(null);
+    }
+  }, [analyzeTriggered]);
 
   const handleAnalyzeSpending = async () => {
+    if (!analyzeTriggered) setAnalyzeTriggered(true);
     if (!llm.ready) {
       setAnalysisError(
         llm.error ??
@@ -135,18 +140,67 @@ export function DashboardPage() {
       />
       <CategoryPieChart data={categoryData} />
       <MonthlyTrendChart data={monthlyTrend} />
-      <AIInsightsPanel
-        insights={aiInsights}
-        comparisons={categoryComparisons}
-        loading={loadingAnalysis}
-        error={analysisError}
-        onAnalyze={handleAnalyzeSpending}
-        modelReady={llm.ready}
-        modelState={llm.state}
-        modelProgress={llm.progress}
-        modelError={llm.error}
-        onRetryModel={llm.retry}
-      />
+
+      {!analyzeTriggered && (
+        <section className="rounded-2xl border border-sky-200 bg-gradient-to-br from-sky-50 to-emerald-50 p-4 shadow-sm transition-colors duration-300 dark:border-sky-900/70 dark:from-slate-900 dark:to-slate-800">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                AI Insights (On-Device)
+              </h3>
+              <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
+                Generate category-wise analysis only when you request it.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleAnalyzeSpending}
+              disabled={!llm.ready}
+              className="rounded-xl bg-sky-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+            >
+              {llm.ready ? 'Analyze My Spending' : 'Model Preparing...'}
+            </button>
+          </div>
+          {!llm.ready && (
+            <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200">
+              <p>
+                {llm.error ??
+                  `AI model is initializing${llm.state === 'downloading' ? ` (${Math.round(llm.progress * 100)}%)` : ''}. Please wait a moment.`}
+              </p>
+              <button
+                type="button"
+                onClick={llm.retry}
+                className="mt-2 rounded-lg bg-amber-600 px-2 py-1 font-semibold text-white transition hover:bg-amber-700"
+              >
+                Retry Model Setup
+              </button>
+            </div>
+          )}
+        </section>
+      )}
+
+      {analyzeTriggered && loadingAnalysis && (
+        <section className="rounded-2xl border border-sky-200 bg-gradient-to-br from-sky-50 to-emerald-50 p-4 shadow-sm transition-colors duration-300 dark:border-sky-900/70 dark:from-slate-900 dark:to-slate-800">
+          <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
+            Analyzing your spending...
+          </p>
+        </section>
+      )}
+
+      {analyzeTriggered && !loadingAnalysis && (
+        <AIInsightsPanel
+          insights={aiInsights}
+          comparisons={categoryComparisons}
+          loading={loadingAnalysis}
+          error={analysisError}
+          onAnalyze={handleAnalyzeSpending}
+          modelReady={llm.ready}
+          modelState={llm.state}
+          modelProgress={llm.progress}
+          modelError={llm.error}
+          onRetryModel={llm.retry}
+        />
+      )}
       <FloatingAddButton />
     </section>
   );
