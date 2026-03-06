@@ -176,6 +176,11 @@ export function UploadAnalyzer() {
                 onChange={(event) => setDraft((prev) => (prev ? { ...prev, merchant: event.target.value } : prev))}
                 className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
               />
+              {draft.merchantEstimated && (
+                <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">
+                  Estimated from receipt
+                </p>
+              )}
             </label>
 
             <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
@@ -205,6 +210,11 @@ export function UploadAnalyzer() {
               <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                 Detected: {formatINR(draft.amount)}
               </p>
+              {draft.amountEstimated && (
+                <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">
+                  Estimated from receipt
+                </p>
+              )}
             </label>
 
             <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
