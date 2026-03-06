@@ -23,7 +23,11 @@ self.addEventListener('activate', (event) => {
 });
 
 const isModelHost = (url) =>
-  url.hostname.includes('huggingface.co') || url.hostname.includes('cdn-lfs.huggingface.co');
+  url.hostname.includes('huggingface.co') ||
+  url.hostname.includes('cdn-lfs.huggingface.co') ||
+  url.hostname.includes('cdn.jsdelivr.net') ||
+  url.hostname.includes('unpkg.com') ||
+  url.hostname.includes('tessdata.projectnaptha.com');
 
 self.addEventListener('fetch', (event) => {
   const { request } = event;

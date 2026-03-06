@@ -27,13 +27,6 @@ export interface CategoryPoint {
   value: number;
 }
 
-export interface ExtractedTransaction {
-  date: string;
-  merchant: string;
-  category: ExpenseCategory;
-  amount: number;
-}
-
 export interface AddExpenseInput {
   amount: number;
   category: ExpenseCategory;
