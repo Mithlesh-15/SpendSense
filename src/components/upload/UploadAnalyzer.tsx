@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useState, type DragEvent } from 'react';
 import { formatINR, useExpenses } from '../../context/ExpenseContext';
 import { EXPENSE_CATEGORIES, type ExpenseCategory } from '../../types/spendsense';
-import { analyzeReceiptLocally, type ReceiptDraft } from '../../services/receiptScanner';
-
-const today = new Date().toISOString().slice(0, 10);
+import {
+  analyzeReceiptLocally,
+  type ExtractedReceiptTransaction,
+} from '../../services/receiptScanner';
 
 export function UploadAnalyzer() {
   const { addExpense } = useExpenses();
   const [file, setFile] = useState<File | null>(null);
-  const [draft, setDraft] = useState<ReceiptDraft | null>(null);
+  const [transactions, setTransactions] = useState<ExtractedReceiptTransaction[]>([]);
   const [ocrProgress, setOcrProgress] = useState(0);
   const [ocrStatus, setOcrStatus] = useState('');
   const [loadingOCR, setLoadingOCR] = useState(false);
@@ -16,6 +17,7 @@ export function UploadAnalyzer() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [needsReview, setNeedsReview] = useState(false);
 
   const previewUrl = useMemo(() => (file ? URL.createObjectURL(file) : null), [file]);
 
@@ -27,7 +29,8 @@ export function UploadAnalyzer() {
 
   const onFileChange = (next: File | null) => {
     setFile(next);
-    setDraft(null);
+    setTransactions([]);
+    setNeedsReview(false);
     setError(null);
     setSuccess(null);
     setOcrProgress(0);
@@ -40,22 +43,62 @@ export function UploadAnalyzer() {
     onFileChange(dropped);
   };
 
+  const saveTransactions = async (rows: ExtractedReceiptTransaction[]) => {
+    if (rows.length === 0) {
+      setError('No valid transactions found to save.');
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      await Promise.all(
+        rows.map((row) =>
+          addExpense({
+            amount: row.amount,
+            category: row.category,
+            note: row.merchant,
+            date: row.date,
+          }),
+        ),
+      );
+      setSuccess(`${rows.length} transaction${rows.length > 1 ? 's' : ''} saved locally.`);
+      setTransactions([]);
+      setNeedsReview(false);
+      setFile(null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to save extracted transactions.';
+      setError(message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const onAnalyze = async () => {
     if (!file) return;
     setError(null);
     setSuccess(null);
-    setDraft(null);
+    setTransactions([]);
+    setNeedsReview(false);
     setLoadingOCR(true);
     setLoadingAI(false);
 
     try {
-      const parsed = await analyzeReceiptLocally(file, (progress, status) => {
+      const result = await analyzeReceiptLocally(file, (progress, status) => {
         setOcrProgress(progress);
         setOcrStatus(status);
       });
       setLoadingOCR(false);
       setLoadingAI(true);
-      setDraft(parsed);
+      setTransactions(result.transactions);
+
+      if (result.lowConfidence) {
+        setNeedsReview(true);
+        setSuccess(
+          `Detected ${result.transactions.length} transaction${result.transactions.length > 1 ? 's' : ''}. Please review before saving.`,
+        );
+      } else {
+        await saveTransactions(result.transactions);
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Receipt processing failed.';
       setError(`Could not process receipt: ${message}`);
@@ -65,31 +108,11 @@ export function UploadAnalyzer() {
     }
   };
 
-  const onSave = async () => {
-    if (!draft || saving) return;
-    if (!draft.merchant.trim() || !draft.amount || draft.amount <= 0) {
-      setError('Please provide valid merchant and amount before saving.');
-      return;
-    }
-
-    setSaving(true);
-    setError(null);
-    try {
-      await addExpense({
-        amount: draft.amount,
-        category: draft.category,
-        note: draft.merchant,
-        date: draft.date || today,
-      });
-      setSuccess('Receipt saved locally. Dashboard has been updated.');
-      setDraft(null);
-      setFile(null);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to save extracted expense.';
-      setError(message);
-    } finally {
-      setSaving(false);
-    }
+  const updateTransaction = (
+    index: number,
+    patch: Partial<ExtractedReceiptTransaction>,
+  ) => {
+    setTransactions((prev) => prev.map((row, i) => (i === index ? { ...row, ...patch } : row)));
   };
 
   return (
@@ -127,15 +150,17 @@ export function UploadAnalyzer() {
 
         <button
           type="button"
-          disabled={!file || loadingOCR || loadingAI}
+          disabled={!file || loadingOCR || loadingAI || saving}
           onClick={onAnalyze}
           className="mt-4 w-full rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-400"
         >
           {loadingOCR
             ? 'Running OCR...'
             : loadingAI
-              ? 'Extracting Receipt Details...'
-              : 'Analyze Receipt Locally'}
+              ? 'Extracting Transactions...'
+              : saving
+                ? 'Saving Transactions...'
+                : 'Analyze Receipt Locally'}
         </button>
 
         {(loadingOCR || loadingAI) && (
@@ -158,100 +183,75 @@ export function UploadAnalyzer() {
         )}
       </article>
 
-      {draft && (
+      {needsReview && transactions.length > 0 && (
         <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition-colors duration-300 dark:border-slate-700 dark:bg-slate-900">
           <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
-            Confirm Extracted Data
+            Review Extracted Transactions
           </h3>
           <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-            Review and edit before saving locally.
+            Confidence is low. Review and save all transactions.
           </p>
 
-          <div className="mt-3 grid gap-3">
-            <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
-              Merchant
-              <input
-                type="text"
-                value={draft.merchant}
-                onChange={(event) => setDraft((prev) => (prev ? { ...prev, merchant: event.target.value } : prev))}
-                className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-              />
-              {draft.merchantEstimated && (
-                <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">
-                  Estimated from receipt
-                </p>
-              )}
-            </label>
-
-            <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
-              Date
-              <input
-                type="date"
-                value={draft.date || today}
-                onChange={(event) => setDraft((prev) => (prev ? { ...prev, date: event.target.value } : prev))}
-                className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-              />
-            </label>
-
-            <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
-              Amount
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                value={draft.amount}
-                onChange={(event) =>
-                  setDraft((prev) =>
-                    prev ? { ...prev, amount: Number(event.target.value || 0) } : prev,
-                  )
-                }
-                className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-              />
-              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                Detected: {formatINR(draft.amount)}
-              </p>
-              {draft.amountEstimated && (
-                <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">
-                  Estimated from receipt
-                </p>
-              )}
-            </label>
-
-            <label className="text-xs font-medium text-slate-600 dark:text-slate-300">
-              Category
-              <select
-                value={draft.category}
-                onChange={(event) =>
-                  setDraft((prev) => (prev ? { ...prev, category: event.target.value as ExpenseCategory } : prev))
-                }
-                className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+          <div className="mt-3 space-y-3">
+            {transactions.map((row, index) => (
+              <div
+                key={`${row.merchant}-${index}`}
+                className="rounded-xl border border-slate-200 p-3 dark:border-slate-700"
               >
-                {EXPENSE_CATEGORIES.map((category) => (
-                  <option key={category} value={category}>
-                    {category}
-                  </option>
-                ))}
-              </select>
-            </label>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <input
+                    type="date"
+                    value={row.date}
+                    onChange={(event) => updateTransaction(index, { date: event.target.value })}
+                    className="rounded-xl border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                  />
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={row.amount}
+                    onChange={(event) =>
+                      updateTransaction(index, { amount: Number(event.target.value || 0) })
+                    }
+                    className="rounded-xl border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                  />
+                </div>
+                <input
+                  type="text"
+                  value={row.merchant}
+                  onChange={(event) => updateTransaction(index, { merchant: event.target.value })}
+                  className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                />
+                <div className="mt-2 flex items-center justify-between">
+                  <select
+                    value={row.category}
+                    onChange={(event) =>
+                      updateTransaction(index, { category: event.target.value as ExpenseCategory })
+                    }
+                    className="rounded-xl border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                  >
+                    {EXPENSE_CATEGORIES.map((category) => (
+                      <option key={category} value={category}>
+                        {category}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                    {formatINR(row.amount)}
+                  </span>
+                </div>
+              </div>
+            ))}
           </div>
 
-          <div className="mt-4 flex gap-2">
-            <button
-              type="button"
-              onClick={onSave}
-              disabled={saving}
-              className="flex-1 rounded-xl bg-sky-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-400"
-            >
-              {saving ? 'Saving...' : 'Save Expense'}
-            </button>
-            <button
-              type="button"
-              onClick={() => setDraft(null)}
-              className="rounded-xl border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-            >
-              Cancel
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => void saveTransactions(transactions)}
+            disabled={saving}
+            className="mt-4 w-full rounded-xl bg-sky-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+          >
+            {saving ? 'Saving...' : `Save ${transactions.length} Transaction${transactions.length > 1 ? 's' : ''}`}
+          </button>
         </article>
       )}
     </section>

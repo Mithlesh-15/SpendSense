@@ -3,22 +3,30 @@ import { TextGeneration } from '@runanywhere/web-llamacpp';
 import { EXPENSE_CATEGORIES, type ExpenseCategory } from '../types/spendsense';
 import { ensureLanguageModelReady } from './spendingAnalysis';
 
-export interface ReceiptDraft {
-  merchant: string;
+export interface ExtractedReceiptTransaction {
   date: string;
+  merchant: string;
   amount: number;
   category: ExpenseCategory;
-  lineItems?: string[];
+  confidence: number;
+}
+
+export interface ReceiptExtractionResult {
+  transactions: ExtractedReceiptTransaction[];
+  lowConfidence: boolean;
   rawText: string;
-  merchantEstimated?: boolean;
-  amountEstimated?: boolean;
+  parser: 'llm' | 'fallback';
+}
+
+interface LLMTransaction {
+  date?: string | null;
+  merchant?: string | null;
+  amount?: number | string | null;
+  category?: string | null;
 }
 
 interface ParsedReceiptPayload {
-  merchant: string | null;
-  date: string | null;
-  amount: number | null;
-  items: string[];
+  transactions: LLMTransaction[];
 }
 
 interface OcrPreprocessResult {
@@ -27,7 +35,8 @@ interface OcrPreprocessResult {
   normalizedLower: string;
 }
 
-const todayISO = () => new Date().toISOString().slice(0, 10);
+const SUMMARY_PATTERN =
+  /(total spent|grand total|total amount|payment summary|share summary|summary)/i;
 
 const devLog = (label: string, value: unknown) => {
   if (import.meta.env.DEV) {
@@ -40,6 +49,7 @@ const preprocessOcrText = (rawText: string): OcrPreprocessResult => {
     .replace(/[^\w\s₹.,:/\-]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+
   return {
     original: rawText,
     normalized,
@@ -47,98 +57,49 @@ const preprocessOcrText = (rawText: string): OcrPreprocessResult => {
   };
 };
 
-const parseCurrencyValue = (text: string): number | null => {
-  const value = Number(text.replace(/[₹,\s]/g, ''));
-  return Number.isFinite(value) ? value : null;
+const toISODate = (value: string | null | undefined): string | null => {
+  if (!value) return null;
+  const cleaned = value.trim().replace(/\//g, '-');
+  const direct = new Date(cleaned);
+  if (!Number.isNaN(direct.getTime())) return direct.toISOString().slice(0, 10);
+
+  const dmy = cleaned.match(/^(\d{1,2})-(\d{1,2})-(\d{2,4})$/);
+  if (!dmy) return null;
+  const [, dd, mm, yy] = dmy;
+  const year = yy.length === 2 ? `20${yy}` : yy;
+  const composed = new Date(`${year}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`);
+  if (Number.isNaN(composed.getTime())) return null;
+  return composed.toISOString().slice(0, 10);
 };
 
-const detectAmountHeuristic = (processed: OcrPreprocessResult): number | null => {
-  const lines = processed.original
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean);
-  const amountRegex = /₹?\s?\d[\d,]*(?:\.\d{1,2})?/g;
-  const keywordRegex = /(grand total|amount payable|amount due|net amount|total)\b/i;
-
-  let keywordCandidates: number[] = [];
-  const allCandidates: number[] = [];
-
-  for (const line of lines) {
-    const matches = line.match(amountRegex) ?? [];
-    const values = matches
-      .map(parseCurrencyValue)
-      .filter((value): value is number => value !== null && value > 0);
-    if (values.length === 0) continue;
-    allCandidates.push(...values);
-    if (keywordRegex.test(line)) {
-      keywordCandidates.push(...values);
-    }
-  }
-
-  if (keywordCandidates.length > 0) {
-    return Math.max(...keywordCandidates);
-  }
-  if (allCandidates.length > 0) {
-    return Math.max(...allCandidates);
+const toAmount = (value: unknown): number | null => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = Number(value.replace(/[^\d.]/g, ''));
+    return Number.isFinite(parsed) ? parsed : null;
   }
   return null;
 };
 
-const detectMerchantHeuristic = (processed: OcrPreprocessResult): string | null => {
-  const blocked = /(total|invoice|tax|gst|qty|price|amount|subtotal|bill|receipt)/i;
-  const lines = processed.original
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean);
-
-  for (const line of lines) {
-    if (blocked.test(line)) continue;
-    if (/\d/.test(line)) continue;
-    if (line.length < 3) continue;
-    const uppercaseChars = line.replace(/[^A-Z]/g, '').length;
-    if (uppercaseChars >= 2 || /^[A-Z][A-Za-z&.\-\s]{2,}$/.test(line)) {
-      return line.replace(/\s+/g, ' ').trim();
-    }
-  }
-
-  return lines[0]?.slice(0, 60) ?? null;
-};
-
-const fallbackCategory = (merchant: string, rawText: string): ExpenseCategory => {
-  const source = `${merchant} ${rawText}`.toLowerCase();
-  if (/cafe|restaurant|swiggy|zomato|food|dine|kitchen/.test(source)) return 'Food';
-  if (/uber|ola|metro|fuel|petrol|flight|travel|taxi/.test(source)) return 'Travel';
-  if (/electric|water|internet|recharge|bill|utility|rent/.test(source)) return 'Bills';
+const fallbackCategory = (merchant: string): ExpenseCategory => {
+  const source = merchant.toLowerCase();
+  if (/rent|landlord|lease/.test(source)) return 'Bills';
+  if (/grocery|fresh|mart|supermarket|food|restaurant|cafe/.test(source)) return 'Food';
+  if (/uber|ola|metro|fuel|petrol|travel|taxi/.test(source)) return 'Travel';
+  if (/electric|water|internet|recharge|bill|utility/.test(source)) return 'Bills';
   if (/movie|netflix|spotify|game|entertainment|cinema/.test(source)) return 'Entertainment';
-  if (/amazon|flipkart|mart|store|shopping|mall/.test(source)) return 'Shopping';
+  if (/amazon|flipkart|shopping|mall|store/.test(source)) return 'Shopping';
   return 'Others';
 };
 
-const assignCategoryWithLLM = async (
-  merchant: string,
-  rawText: string,
-): Promise<ExpenseCategory> => {
-  const prompt = [
-    'Classify this receipt into exactly one category.',
-    `Allowed categories: ${EXPENSE_CATEGORIES.join(', ')}`,
-    'Return only the category text.',
-    `Merchant: ${merchant}`,
-    `OCR Text: ${rawText.slice(0, 1500)}`,
-  ].join('\n');
-
-  try {
-    const response = await TextGeneration.generate(prompt, {
-      maxTokens: 10,
-      temperature: 0,
-    });
-    const cleaned = (response.text ?? '').trim().replace(/[^\w\s]/g, '');
-    const matched = EXPENSE_CATEGORIES.find(
-      (category) => category.toLowerCase() === cleaned.toLowerCase(),
-    );
-    return matched ?? fallbackCategory(merchant, rawText);
-  } catch {
-    return fallbackCategory(merchant, rawText);
-  }
+const mapCategory = (value: string | null | undefined, merchant: string): ExpenseCategory => {
+  if (!value) return fallbackCategory(merchant);
+  const cleaned = value.trim().toLowerCase();
+  const exact = EXPENSE_CATEGORIES.find((category) => category.toLowerCase() === cleaned);
+  if (exact) return exact;
+  if (/grocery/.test(cleaned)) return 'Food';
+  if (/rent|utility/.test(cleaned)) return 'Bills';
+  return fallbackCategory(merchant);
 };
 
 const extractFirstJsonObject = (text: string): string | null => {
@@ -156,92 +117,87 @@ const extractFirstJsonObject = (text: string): string | null => {
 const cleanJsonCandidate = (raw: string): string => {
   let cleaned = raw.trim();
   cleaned = cleaned.replace(/```json/gi, '').replace(/```/g, '').trim();
-
   const objectText = extractFirstJsonObject(cleaned);
   if (objectText) cleaned = objectText;
-
   cleaned = cleaned.replace(/,\s*([}\]])/g, '$1');
   return cleaned;
 };
 
-const toNumber = (value: unknown): number | null => {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'string') {
-    const parsed = Number(value.replace(/[^\d.]/g, ''));
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-  return null;
-};
-
-const validateReceiptPayload = (input: unknown): ParsedReceiptPayload => {
-  if (!input || typeof input !== 'object') {
-    throw new Error('Receipt detected but data could not be structured properly.');
-  }
-
-  const parsed = input as {
-    merchant?: unknown;
-    date?: unknown;
-    amount?: unknown;
-    items?: unknown;
-    lineItems?: unknown;
-  };
-
-  const merchant = parsed.merchant == null ? null : String(parsed.merchant).trim();
-  const date = parsed.date == null ? null : String(parsed.date).trim();
-  const amount = toNumber(parsed.amount);
-
-  const rawItems = Array.isArray(parsed.items)
-    ? parsed.items
-    : Array.isArray(parsed.lineItems)
-      ? parsed.lineItems
-      : [];
-  const items = rawItems.map((item) => String(item).trim()).filter(Boolean).slice(0, 8);
-
-  if (merchant !== null && typeof merchant !== 'string') {
-    throw new Error('Receipt detected but data could not be structured properly.');
-  }
-  if (date !== null && typeof date !== 'string') {
-    throw new Error('Receipt detected but data could not be structured properly.');
-  }
-  if (amount !== null && typeof amount !== 'number') {
-    throw new Error('Receipt detected but data could not be structured properly.');
-  }
-  if (!Array.isArray(items)) {
-    throw new Error('Receipt detected but data could not be structured properly.');
-  }
-
-  return {
-    merchant,
-    date,
-    amount,
-    items,
-  };
-};
-
-const parseReceiptResponse = (rawResponse: string): ParsedReceiptPayload => {
+const parseLLMJson = (rawResponse: string): ParsedReceiptPayload => {
   const attempts = [rawResponse, cleanJsonCandidate(rawResponse)];
-
   for (const attempt of attempts) {
     try {
-      const parsed = JSON.parse(attempt);
-      return validateReceiptPayload(parsed);
+      const parsed = JSON.parse(attempt) as ParsedReceiptPayload;
+      if (!parsed || !Array.isArray(parsed.transactions)) continue;
+      return parsed;
     } catch {
-      // continue
+      // try next
     }
   }
-
   throw new Error('Receipt detected but data could not be structured properly.');
 };
 
-const fallbackExtractFromOcr = (processed: OcrPreprocessResult): ParsedReceiptPayload => {
-  const merchant = detectMerchantHeuristic(processed);
-  const amount = detectAmountHeuristic(processed);
-  const dateMatch = processed.original.match(
-    /\b(\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/]\d{2,4})\b/,
-  );
-  const date = dateMatch ? dateMatch[1].replace(/\//g, '-') : null;
+const validateAndNormalizeTransactions = (
+  transactions: LLMTransaction[],
+  parser: 'llm' | 'fallback',
+): ExtractedReceiptTransaction[] =>
+  transactions
+    .map((item) => {
+      const merchant = (item.merchant ?? '').trim();
+      const isoDate = toISODate(item.date);
+      const amount = toAmount(item.amount);
+      if (!merchant || SUMMARY_PATTERN.test(merchant)) return null;
+      if (!isoDate || !amount || amount <= 0) return null;
+      return {
+        date: isoDate,
+        merchant,
+        amount,
+        category: mapCategory(item.category, merchant),
+        confidence: parser === 'llm' ? 0.9 : 0.55,
+      } as ExtractedReceiptTransaction;
+    })
+    .filter((item): item is ExtractedReceiptTransaction => item !== null);
 
-  return { merchant, date, amount, items: [] };
+const fallbackTransactionsFromOCR = (processed: OcrPreprocessResult): ExtractedReceiptTransaction[] => {
+  const lines = processed.original
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const datePattern = /\b(\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/]\d{2,4})\b/;
+  const amountPattern = /₹?\s?\d[\d,]*(?:\.\d{1,2})?/g;
+
+  const extracted: ExtractedReceiptTransaction[] = [];
+  for (const line of lines) {
+    if (SUMMARY_PATTERN.test(line)) continue;
+    const dateMatch = line.match(datePattern);
+    if (!dateMatch) continue;
+    const isoDate = toISODate(dateMatch[1]);
+    if (!isoDate) continue;
+
+    const amountMatches = line.match(amountPattern) ?? [];
+    const amounts = amountMatches
+      .map((value) => Number(value.replace(/[₹,\s]/g, '')))
+      .filter((value) => Number.isFinite(value) && value > 0);
+    if (amounts.length === 0) continue;
+    const amount = Math.max(...amounts);
+
+    const merchant = line
+      .replace(dateMatch[0], '')
+      .replace(amountPattern, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!merchant || SUMMARY_PATTERN.test(merchant)) continue;
+
+    extracted.push({
+      date: isoDate,
+      merchant,
+      amount,
+      category: fallbackCategory(merchant),
+      confidence: 0.5,
+    });
+  }
+  return extracted;
 };
 
 export async function extractTextFromReceipt(
@@ -250,9 +206,7 @@ export async function extractTextFromReceipt(
 ): Promise<string> {
   const worker = await Tesseract.createWorker('eng', 1, {
     logger: (message) => {
-      if (onProgress) {
-        onProgress(message.progress ?? 0, message.status ?? 'processing');
-      }
+      if (onProgress) onProgress(message.progress ?? 0, message.status ?? 'processing');
     },
     cacheMethod: 'write',
   });
@@ -270,82 +224,63 @@ export async function extractTextFromReceipt(
 export async function analyzeReceiptLocally(
   imageFile: File,
   onOcrProgress?: (value: number, status: string) => void,
-): Promise<ReceiptDraft> {
+): Promise<ReceiptExtractionResult> {
   const rawText = await extractTextFromReceipt(imageFile, onOcrProgress);
   const processed = preprocessOcrText(rawText);
   devLog('Raw OCR text', rawText);
 
-  const heuristicMerchant = detectMerchantHeuristic(processed);
-  const heuristicAmount = detectAmountHeuristic(processed);
-  devLog('Heuristic merchant', heuristicMerchant);
-  devLog('Heuristic amount', heuristicAmount);
-
   await ensureLanguageModelReady();
 
   const extractionPrompt = [
-    'Extract receipt fields from OCR text.',
-    'Return ONLY valid JSON.',
-    'Do NOT include explanations.',
-    'Do NOT include markdown formatting.',
-    'Do NOT wrap JSON in backticks.',
-    'Do NOT add trailing commas.',
+    'Extract transactions from receipt OCR text.',
+    'Return STRICT JSON only.',
+    'No explanations. No markdown. No backticks. No trailing commas.',
     'Output must be a single JSON object.',
-    'If data is missing, return null instead of guessing.',
     'JSON schema:',
-    '{"merchant": string|null, "date": string|null, "amount": number|null, "items": string[]}',
-    `OCR_TEXT:\n${processed.normalized.slice(0, 3500)}`,
+    '{"transactions":[{"date":"YYYY-MM-DD","merchant":"string","amount":number,"category":"string|null"}]}',
+    'Rules:',
+    '- Ignore summary lines containing: Total Spent, Grand Total, Total Amount, Payment Summary, Share Summary.',
+    '- Extract only rows that contain a valid date + merchant + numeric amount.',
+    '- If one transaction exists, still return it inside the transactions array.',
+    '- If uncertain about category, return null.',
+    `OCR_TEXT:\n${processed.normalized.slice(0, 5000)}`,
   ].join('\n');
 
-  let parsed: ParsedReceiptPayload;
   try {
-    const extractionResponse = await TextGeneration.generate(extractionPrompt, {
-      maxTokens: 220,
+    const llmResponse = await TextGeneration.generate(extractionPrompt, {
+      maxTokens: 500,
       temperature: 0,
       topP: 0.9,
     });
-
-    const rawLLM = extractionResponse.text ?? '';
+    const rawLLM = llmResponse.text ?? '';
     devLog('Raw LLM response', rawLLM);
     const cleaned = cleanJsonCandidate(rawLLM);
     devLog('Cleaned LLM response', cleaned);
-    parsed = parseReceiptResponse(rawLLM);
+
+    const payload = parseLLMJson(rawLLM);
+    const transactions = validateAndNormalizeTransactions(payload.transactions, 'llm');
+
+    if (transactions.length > 0) {
+      return {
+        transactions,
+        lowConfidence: transactions.some((item) => item.confidence < 0.7),
+        rawText,
+        parser: 'llm',
+      };
+    }
   } catch (error) {
-    devLog('LLM parse failed, applying OCR fallback', error);
-    parsed = fallbackExtractFromOcr(processed);
+    devLog('LLM extraction failed', error);
   }
 
-  let merchant = (parsed.merchant ?? '').trim();
-  let amount = parsed.amount ?? 0;
-  let merchantEstimated = false;
-  let amountEstimated = false;
-
-  if (!merchant) {
-    merchant = heuristicMerchant ?? 'Unknown Merchant';
-    merchantEstimated = true;
+  const fallbackTransactions = fallbackTransactionsFromOCR(processed);
+  if (fallbackTransactions.length === 0) {
+    throw new Error('Receipt detected but data could not be structured properly.');
   }
-
-  if (!amount || amount <= 0) {
-    amount = heuristicAmount ?? 0;
-    amountEstimated = true;
-  }
-
-  if (!merchant || merchant === 'Unknown Merchant') merchantEstimated = true;
-  if (!amount || amount <= 0) amountEstimated = true;
-
-  const date = parsed.date && !Number.isNaN(new Date(parsed.date).getTime())
-    ? new Date(parsed.date).toISOString().slice(0, 10)
-    : todayISO();
-  const lineItems = parsed.items ?? [];
-  const category = await assignCategoryWithLLM(merchant, rawText);
 
   return {
-    merchant,
-    date,
-    amount,
-    category,
-    lineItems,
+    transactions: fallbackTransactions,
+    lowConfidence: true,
     rawText,
-    merchantEstimated,
-    amountEstimated,
+    parser: 'fallback',
   };
 }
