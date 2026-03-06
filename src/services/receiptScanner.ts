@@ -224,11 +224,14 @@ export async function extractTextFromReceipt(
 export async function analyzeReceiptLocally(
   imageFile: File,
   onOcrProgress?: (value: number, status: string) => void,
+  onStageChange?: (stage: 'ocr' | 'llm') => void,
 ): Promise<ReceiptExtractionResult> {
+  onStageChange?.('ocr');
   const rawText = await extractTextFromReceipt(imageFile, onOcrProgress);
   const processed = preprocessOcrText(rawText);
   devLog('Raw OCR text', rawText);
 
+  onStageChange?.('llm');
   await ensureLanguageModelReady();
 
   const extractionPrompt = [

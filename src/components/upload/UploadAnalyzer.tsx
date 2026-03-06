@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type DragEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
 import { formatINR, useExpenses } from '../../context/ExpenseContext';
 import { EXPENSE_CATEGORIES, type ExpenseCategory } from '../../types/spendsense';
 import {
@@ -6,26 +6,47 @@ import {
   type ExtractedReceiptTransaction,
 } from '../../services/receiptScanner';
 
+type ProcessingState = 'idle' | 'ocr' | 'llm' | 'saving' | 'success' | 'error';
+
 export function UploadAnalyzer() {
   const { addExpense } = useExpenses();
+  const [processingState, setProcessingState] = useState<ProcessingState>('idle');
   const [file, setFile] = useState<File | null>(null);
   const [transactions, setTransactions] = useState<ExtractedReceiptTransaction[]>([]);
   const [ocrProgress, setOcrProgress] = useState(0);
   const [ocrStatus, setOcrStatus] = useState('');
-  const [loadingOCR, setLoadingOCR] = useState(false);
-  const [loadingAI, setLoadingAI] = useState(false);
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [needsReview, setNeedsReview] = useState(false);
+  const [llmSlow, setLlmSlow] = useState(false);
+  const runIdRef = useRef(0);
 
   const previewUrl = useMemo(() => (file ? URL.createObjectURL(file) : null), [file]);
+  const isProcessing = processingState === 'ocr' || processingState === 'llm' || processingState === 'saving';
 
   useEffect(() => {
     return () => {
       if (previewUrl) URL.revokeObjectURL(previewUrl);
     };
   }, [previewUrl]);
+
+  useEffect(() => {
+    if (processingState !== 'success') return;
+    const timer = window.setTimeout(() => {
+      setSuccess(null);
+      setProcessingState('idle');
+    }, 2500);
+    return () => window.clearTimeout(timer);
+  }, [processingState]);
+
+  useEffect(() => {
+    if (processingState !== 'llm') {
+      setLlmSlow(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setLlmSlow(true), 15_000);
+    return () => window.clearTimeout(timer);
+  }, [processingState]);
 
   const onFileChange = (next: File | null) => {
     setFile(next);
@@ -35,6 +56,7 @@ export function UploadAnalyzer() {
     setSuccess(null);
     setOcrProgress(0);
     setOcrStatus('');
+    setProcessingState('idle');
   };
 
   const onDrop = (event: DragEvent<HTMLLabelElement>) => {
@@ -45,10 +67,12 @@ export function UploadAnalyzer() {
 
   const saveTransactions = async (rows: ExtractedReceiptTransaction[]) => {
     if (rows.length === 0) {
-      setError('No valid transactions found to save.');
+      setError('Could not extract transactions. Please review manually.');
+      setProcessingState('error');
       return;
     }
-    setSaving(true);
+
+    setProcessingState('saving');
     setError(null);
     try {
       await Promise.all(
@@ -61,34 +85,53 @@ export function UploadAnalyzer() {
           }),
         ),
       );
-      setSuccess(`${rows.length} transaction${rows.length > 1 ? 's' : ''} saved locally.`);
+      setSuccess('✅ Transactions successfully saved');
       setTransactions([]);
       setNeedsReview(false);
       setFile(null);
+      setProcessingState('success');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to save extracted transactions.';
       setError(message);
-    } finally {
-      setSaving(false);
+      setProcessingState('error');
     }
   };
 
+  const cancelProcessing = () => {
+    runIdRef.current += 1;
+    setProcessingState('idle');
+    setLlmSlow(false);
+    setError('Processing cancelled. You can try again.');
+  };
+
   const onAnalyze = async () => {
-    if (!file) return;
+    if (!file || isProcessing) return;
+    runIdRef.current += 1;
+    const runId = runIdRef.current;
     setError(null);
     setSuccess(null);
     setTransactions([]);
     setNeedsReview(false);
-    setLoadingOCR(true);
-    setLoadingAI(false);
+    setOcrProgress(0);
+    setOcrStatus('');
+    setProcessingState('ocr');
 
     try {
-      const result = await analyzeReceiptLocally(file, (progress, status) => {
-        setOcrProgress(progress);
-        setOcrStatus(status);
-      });
-      setLoadingOCR(false);
-      setLoadingAI(true);
+      const result = await analyzeReceiptLocally(
+        file,
+        (progress, status) => {
+          if (runIdRef.current !== runId) return;
+          setOcrProgress(progress);
+          setOcrStatus(status);
+          setProcessingState('ocr');
+        },
+        (stage) => {
+          if (runIdRef.current !== runId) return;
+          setProcessingState(stage);
+        },
+      );
+
+      if (runIdRef.current !== runId) return;
       setTransactions(result.transactions);
 
       if (result.lowConfidence) {
@@ -96,15 +139,15 @@ export function UploadAnalyzer() {
         setSuccess(
           `Detected ${result.transactions.length} transaction${result.transactions.length > 1 ? 's' : ''}. Please review before saving.`,
         );
+        setProcessingState('idle');
       } else {
         await saveTransactions(result.transactions);
       }
     } catch (err) {
+      if (runIdRef.current !== runId) return;
       const message = err instanceof Error ? err.message : 'Receipt processing failed.';
-      setError(`Could not process receipt: ${message}`);
-    } finally {
-      setLoadingOCR(false);
-      setLoadingAI(false);
+      setError(`❌ Could not extract transactions. Please review manually. (${message})`);
+      setProcessingState('error');
     }
   };
 
@@ -132,6 +175,7 @@ export function UploadAnalyzer() {
             type="file"
             accept="image/jpeg,image/png"
             className="hidden"
+            disabled={isProcessing}
             onChange={(event) => onFileChange(event.target.files?.[0] ?? null)}
           />
           <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
@@ -150,28 +194,65 @@ export function UploadAnalyzer() {
 
         <button
           type="button"
-          disabled={!file || loadingOCR || loadingAI || saving}
+          disabled={!file || isProcessing}
           onClick={onAnalyze}
           className="mt-4 w-full rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-400"
         >
-          {loadingOCR
-            ? 'Running OCR...'
-            : loadingAI
-              ? 'Extracting Transactions...'
-              : saving
-                ? 'Saving Transactions...'
+          {processingState === 'ocr'
+            ? 'Scanning receipt...'
+            : processingState === 'llm'
+              ? 'Analyzing transactions with AI...'
+              : processingState === 'saving'
+                ? 'Saving transactions locally...'
                 : 'Analyze Receipt Locally'}
         </button>
 
-        {(loadingOCR || loadingAI) && (
-          <div className="mt-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-700 dark:border-sky-900/60 dark:bg-sky-950/40 dark:text-sky-300">
-            {loadingOCR
-              ? `OCR in progress: ${Math.round(ocrProgress * 100)}% (${ocrStatus || 'processing'})`
-              : 'Analyzing OCR text with on-device AI...'}
+        {processingState === 'ocr' && (
+          <div className="mt-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-3 text-xs text-sky-700 dark:border-sky-900/60 dark:bg-sky-950/40 dark:text-sky-300">
+            <p className="font-medium">Scanning receipt...</p>
+            <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-sky-100 dark:bg-slate-800">
+              <div
+                className="h-2 rounded-full bg-sky-500 transition-all duration-200"
+                style={{ width: `${Math.max(2, Math.min(100, Math.round(ocrProgress * 100)))}%` }}
+              />
+            </div>
+            <p className="mt-1">
+              {Math.round(ocrProgress * 100)}% {ocrStatus ? `(${ocrStatus})` : ''}
+            </p>
           </div>
         )}
 
-        {error && (
+        {processingState === 'llm' && (
+          <div className="mt-3 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-3 text-xs text-indigo-700 dark:border-indigo-900/60 dark:bg-indigo-950/40 dark:text-indigo-300">
+            <p className="font-medium">Analyzing transactions with AI...</p>
+            <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-indigo-100 dark:bg-slate-800">
+              <div className="h-2 w-1/3 animate-[pulse_1.1s_ease-in-out_infinite] rounded-full bg-indigo-500" />
+            </div>
+            {llmSlow && (
+              <div className="mt-2 flex items-center justify-between gap-2">
+                <p>AI is taking longer than expected...</p>
+                <button
+                  type="button"
+                  onClick={cancelProcessing}
+                  className="rounded-lg bg-indigo-600 px-2 py-1 text-[11px] font-semibold text-white hover:bg-indigo-700"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {processingState === 'saving' && (
+          <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3 text-xs text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300">
+            <p className="font-medium">Saving transactions locally...</p>
+            <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-emerald-100 dark:bg-slate-800">
+              <div className="h-2 w-1/2 animate-[pulse_1.1s_ease-in-out_infinite] rounded-full bg-emerald-500" />
+            </div>
+          </div>
+        )}
+
+        {processingState === 'error' && error && (
           <p className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-300">
             {error}
           </p>
@@ -247,10 +328,12 @@ export function UploadAnalyzer() {
           <button
             type="button"
             onClick={() => void saveTransactions(transactions)}
-            disabled={saving}
+            disabled={isProcessing}
             className="mt-4 w-full rounded-xl bg-sky-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-400"
           >
-            {saving ? 'Saving...' : `Save ${transactions.length} Transaction${transactions.length > 1 ? 's' : ''}`}
+            {processingState === 'saving'
+              ? 'Saving transactions locally...'
+              : `Save ${transactions.length} Transaction${transactions.length > 1 ? 's' : ''}`}
           </button>
         </article>
       )}
