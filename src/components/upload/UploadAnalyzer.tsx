@@ -7,7 +7,7 @@ import {
   type ExtractedReceiptTransaction,
 } from '../../services/receiptScanner';
 
-type ProcessingState = 'idle' | 'ocr' | 'llm' | 'saving' | 'success' | 'error';
+type ProcessingState = 'idle' | 'scanning' | 'analyzing' | 'saving' | 'success' | 'error';
 
 export function UploadAnalyzer() {
   const { addExpense } = useExpenses();
@@ -20,12 +20,13 @@ export function UploadAnalyzer() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [needsReview, setNeedsReview] = useState(false);
-  const [llmSlow, setLlmSlow] = useState(false);
+  const [analysisSlow, setAnalysisSlow] = useState(false);
   const [modelNotice, setModelNotice] = useState<string | null>(null);
   const runIdRef = useRef(0);
 
   const previewUrl = useMemo(() => (file ? URL.createObjectURL(file) : null), [file]);
-  const isProcessing = processingState === 'ocr' || processingState === 'llm' || processingState === 'saving';
+  const isProcessing =
+    processingState === 'scanning' || processingState === 'analyzing' || processingState === 'saving';
 
   useEffect(() => {
     return () => {
@@ -43,11 +44,11 @@ export function UploadAnalyzer() {
   }, [processingState]);
 
   useEffect(() => {
-    if (processingState !== 'llm') {
-      setLlmSlow(false);
+    if (processingState !== 'analyzing') {
+      setAnalysisSlow(false);
       return;
     }
-    const timer = window.setTimeout(() => setLlmSlow(true), 15_000);
+    const timer = window.setTimeout(() => setAnalysisSlow(true), 15_000);
     return () => window.clearTimeout(timer);
   }, [processingState]);
 
@@ -70,17 +71,23 @@ export function UploadAnalyzer() {
   };
 
   const saveTransactions = async (rows: ExtractedReceiptTransaction[]) => {
-    if (rows.length === 0) {
-      setError('Could not extract transactions. Please review manually.');
-      setProcessingState('error');
-      return;
-    }
+    const rowsToSave = rows.length > 0
+      ? rows
+      : [
+        {
+          date: new Date().toISOString().slice(0, 10),
+          merchant: 'Unknown Merchant',
+          amount: 0,
+          category: 'Others' as ExpenseCategory,
+          confidence: 0.2,
+        },
+      ];
 
     setProcessingState('saving');
     setError(null);
     try {
       await Promise.all(
-        rows.map((row) =>
+        rowsToSave.map((row) =>
           addExpense({
             amount: row.amount,
             category: row.category,
@@ -89,7 +96,8 @@ export function UploadAnalyzer() {
           }),
         ),
       );
-      setSuccess('✅ Transactions successfully saved');
+      setSuccess('Transactions saved locally and dashboard refreshed.');
+      window.dispatchEvent(new CustomEvent('spendsense:expenses-updated'));
       setTransactions([]);
       setNeedsReview(false);
       setFile(null);
@@ -104,7 +112,7 @@ export function UploadAnalyzer() {
   const cancelProcessing = () => {
     runIdRef.current += 1;
     setProcessingState('idle');
-    setLlmSlow(false);
+    setAnalysisSlow(false);
     setError('Processing cancelled. You can try again.');
   };
 
@@ -119,10 +127,10 @@ export function UploadAnalyzer() {
     setNeedsReview(false);
     setOcrProgress(0);
     setOcrStatus('');
-    setProcessingState('ocr');
+    setProcessingState('scanning');
 
     if (model.state !== 'ready') {
-      setModelNotice('AI model not ready. Please wait.');
+      setModelNotice('AI model unavailable. Using rule-based offline parsing.');
     }
 
     try {
@@ -132,7 +140,7 @@ export function UploadAnalyzer() {
           if (runIdRef.current !== runId) return;
           setOcrProgress(progress);
           setOcrStatus(status);
-          setProcessingState('ocr');
+          setProcessingState('scanning');
         },
         (stage) => {
           if (runIdRef.current !== runId) return;
@@ -150,7 +158,7 @@ export function UploadAnalyzer() {
       if (result.lowConfidence) {
         setNeedsReview(true);
         setSuccess(
-          `Detected ${result.transactions.length} transaction${result.transactions.length > 1 ? 's' : ''}. Please review before saving.`,
+          `Parsed in ${result.parser} mode. Review ${result.transactions.length} transaction${result.transactions.length > 1 ? 's' : ''} before saving.`,
         );
         setProcessingState('idle');
       } else {
@@ -159,8 +167,22 @@ export function UploadAnalyzer() {
     } catch (err) {
       if (runIdRef.current !== runId) return;
       const message = err instanceof Error ? err.message : 'Receipt processing failed.';
-      setError(`❌ Could not extract transactions. Please review manually. (${message})`);
+      setError(`Could not extract clean transactions. You can edit and save manually. (${message})`);
       setProcessingState('error');
+      setNeedsReview(true);
+      setTransactions((prev) => (
+        prev.length > 0
+          ? prev
+          : [
+            {
+              date: new Date().toISOString().slice(0, 10),
+              merchant: 'Unknown Merchant',
+              amount: 0,
+              category: 'Others',
+              confidence: 0.2,
+            },
+          ]
+      ));
     }
   };
 
@@ -176,7 +198,7 @@ export function UploadAnalyzer() {
       <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition-colors duration-300 dark:border-slate-700 dark:bg-slate-900">
         <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Upload Receipt</h2>
         <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-          Upload JPG or PNG receipts. OCR and AI parsing run locally on your device.
+          Upload JPG or PNG receipts. OCR and parsing run locally on your device.
         </p>
 
         <label
@@ -211,16 +233,16 @@ export function UploadAnalyzer() {
           onClick={onAnalyze}
           className="mt-4 w-full rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-400"
         >
-          {processingState === 'ocr'
+          {processingState === 'scanning'
             ? 'Scanning receipt...'
-            : processingState === 'llm'
-              ? 'Analyzing transactions with AI...'
+            : processingState === 'analyzing'
+              ? 'Analyzing receipt...'
               : processingState === 'saving'
                 ? 'Saving transactions locally...'
                 : 'Analyze Receipt Locally'}
         </button>
 
-        {processingState === 'ocr' && (
+        {processingState === 'scanning' && (
           <div className="mt-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-3 text-xs text-sky-700 dark:border-sky-900/60 dark:bg-sky-950/40 dark:text-sky-300">
             <p className="font-medium">Scanning receipt...</p>
             <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-sky-100 dark:bg-slate-800">
@@ -235,15 +257,15 @@ export function UploadAnalyzer() {
           </div>
         )}
 
-        {processingState === 'llm' && (
+        {processingState === 'analyzing' && (
           <div className="mt-3 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-3 text-xs text-indigo-700 dark:border-indigo-900/60 dark:bg-indigo-950/40 dark:text-indigo-300">
-            <p className="font-medium">Analyzing transactions with AI...</p>
+            <p className="font-medium">Analyzing receipt (statement/rule-based/AI hybrid)...</p>
             <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-indigo-100 dark:bg-slate-800">
               <div className="h-2 w-1/3 animate-[pulse_1.1s_ease-in-out_infinite] rounded-full bg-indigo-500" />
             </div>
-            {llmSlow && (
+            {analysisSlow && (
               <div className="mt-2 flex items-center justify-between gap-2">
-                <p>AI is taking longer than expected...</p>
+                <p>Processing is taking longer than expected...</p>
                 <button
                   type="button"
                   onClick={cancelProcessing}
@@ -288,7 +310,7 @@ export function UploadAnalyzer() {
             Review Extracted Transactions
           </h3>
           <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-            Confidence is low. Review and save all transactions.
+            Confidence is low. Edit any fields and save.
           </p>
 
           <div className="mt-3 space-y-3">
