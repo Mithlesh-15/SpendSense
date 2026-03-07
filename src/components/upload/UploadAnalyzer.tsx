@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
 import { formatINR, useExpenses } from '../../context/ExpenseContext';
+import { useModelReadiness } from '../../context/ModelReadinessContext';
 import { EXPENSE_CATEGORIES, type ExpenseCategory } from '../../types/spendsense';
 import {
   analyzeReceiptLocally,
@@ -10,6 +11,7 @@ type ProcessingState = 'idle' | 'ocr' | 'llm' | 'saving' | 'success' | 'error';
 
 export function UploadAnalyzer() {
   const { addExpense } = useExpenses();
+  const model = useModelReadiness();
   const [processingState, setProcessingState] = useState<ProcessingState>('idle');
   const [file, setFile] = useState<File | null>(null);
   const [transactions, setTransactions] = useState<ExtractedReceiptTransaction[]>([]);
@@ -19,6 +21,7 @@ export function UploadAnalyzer() {
   const [success, setSuccess] = useState<string | null>(null);
   const [needsReview, setNeedsReview] = useState(false);
   const [llmSlow, setLlmSlow] = useState(false);
+  const [modelNotice, setModelNotice] = useState<string | null>(null);
   const runIdRef = useRef(0);
 
   const previewUrl = useMemo(() => (file ? URL.createObjectURL(file) : null), [file]);
@@ -54,6 +57,7 @@ export function UploadAnalyzer() {
     setNeedsReview(false);
     setError(null);
     setSuccess(null);
+    setModelNotice(null);
     setOcrProgress(0);
     setOcrStatus('');
     setProcessingState('idle');
@@ -110,11 +114,16 @@ export function UploadAnalyzer() {
     const runId = runIdRef.current;
     setError(null);
     setSuccess(null);
+    setModelNotice(null);
     setTransactions([]);
     setNeedsReview(false);
     setOcrProgress(0);
     setOcrStatus('');
     setProcessingState('ocr');
+
+    if (model.state !== 'ready') {
+      setModelNotice('AI model not ready. Please wait.');
+    }
 
     try {
       const result = await analyzeReceiptLocally(
@@ -128,6 +137,10 @@ export function UploadAnalyzer() {
         (stage) => {
           if (runIdRef.current !== runId) return;
           setProcessingState(stage);
+        },
+        {
+          llmReady: model.state === 'ready',
+          modelStatus: model.state,
         },
       );
 
@@ -255,6 +268,11 @@ export function UploadAnalyzer() {
         {processingState === 'error' && error && (
           <p className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-300">
             {error}
+          </p>
+        )}
+        {modelNotice && (
+          <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300">
+            {modelNotice}
           </p>
         )}
         {success && (
