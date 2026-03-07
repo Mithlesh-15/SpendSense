@@ -98,12 +98,48 @@ const MODELS: CompactModelDef[] = [
 // ---------------------------------------------------------------------------
 
 let _initPromise: Promise<void> | null = null;
+let _assetProbeOnce = false;
+
+const toAssetUrl = (assetPath: string): string => {
+  const base = import.meta.env.BASE_URL || '/';
+  const normalizedBase = base.endsWith('/') ? base : `${base}/`;
+  return `${normalizedBase}${assetPath.replace(/^\/+/, '')}`;
+};
+
+const probeRuntimeAssets = async (): Promise<void> => {
+  if (_assetProbeOnce || typeof window === 'undefined') return;
+  _assetProbeOnce = true;
+
+  const criticalAssets = [
+    'assets/racommons-llamacpp.wasm',
+    'assets/racommons-llamacpp-webgpu.wasm',
+    'assets/sherpa/sherpa-onnx.wasm',
+  ];
+
+  for (const item of criticalAssets) {
+    const url = toAssetUrl(item);
+    try {
+      const res = await fetch(url, { method: 'HEAD', cache: 'no-store' });
+      if (!res.ok) {
+        console.error('[SpendSense][LLM] WASM asset fetch failed', {
+          asset: item,
+          url,
+          status: res.status,
+        });
+      }
+    } catch (error) {
+      console.error('[SpendSense][LLM] WASM load failure', { asset: item, url, error });
+    }
+  }
+};
 
 /** Initialize the RunAnywhere SDK. Safe to call multiple times. */
 export async function initSDK(): Promise<void> {
   if (_initPromise) return _initPromise;
 
   _initPromise = (async () => {
+    await probeRuntimeAssets();
+
     // Step 1: Initialize core SDK (TypeScript-only, no WASM)
     await RunAnywhere.initialize({
       environment: SDKEnvironment.Production,
@@ -111,8 +147,19 @@ export async function initSDK(): Promise<void> {
     });
 
     // Step 2: Register backends (loads WASM automatically)
-    await LlamaCPP.register();
-    await ONNX.register();
+    try {
+      await LlamaCPP.register();
+    } catch (error) {
+      console.error('[SpendSense][LLM] WASM load failure during LlamaCPP.register()', error);
+      throw error;
+    }
+
+    try {
+      await ONNX.register();
+    } catch (error) {
+      console.error('[SpendSense][LLM] WASM load failure during ONNX.register()', error);
+      throw error;
+    }
 
     // Step 3: Register model catalog
     RunAnywhere.registerModels(MODELS);

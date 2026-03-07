@@ -149,7 +149,16 @@ export const ensureLanguageModelReady = async (): Promise<LanguageModelDiagnosti
   const hasLocalMarker = cachedMeta?.modelId === model.id;
 
   if (hasLocalMarker) {
-    const loadedFromLocal = await ModelManager.loadModel(model.id, { coexist: true });
+    let loadedFromLocal = false;
+    try {
+      loadedFromLocal = await ModelManager.loadModel(model.id, { coexist: true });
+    } catch (error) {
+      console.error('[SpendSense][LLM] model file fetch failure during local load', {
+        modelId: model.id,
+        error,
+      });
+      throw error;
+    }
     if (loadedFromLocal) {
       const loadedModel = ModelManager.getLoadedModel(ModelCategory.Language);
       return {
@@ -166,7 +175,16 @@ export const ensureLanguageModelReady = async (): Promise<LanguageModelDiagnosti
     throw new Error('AI model is preparing. Please stay online for the first initialization.');
   }
 
-  const ensured = await ModelManager.ensureLoaded(ModelCategory.Language, { coexist: true });
+  let ensured;
+  try {
+    ensured = await ModelManager.ensureLoaded(ModelCategory.Language, { coexist: true });
+  } catch (error) {
+    console.error('[SpendSense][LLM] model file fetch failure during ensureLoaded()', {
+      modelId: model.id,
+      error,
+    });
+    throw error;
+  }
   const loadedModel = ModelManager.getLoadedModel(ModelCategory.Language) ?? ensured;
   if (!loadedModel) {
     if (!online) {
