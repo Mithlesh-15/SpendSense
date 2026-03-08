@@ -130,7 +130,7 @@ export function UploadAnalyzer() {
     setProcessingState('scanning');
 
     if (model.state !== 'ready') {
-      setModelNotice('AI model unavailable. Using rule-based offline parsing.');
+      setModelNotice(null);
     }
 
     try {
