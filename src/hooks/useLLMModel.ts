@@ -17,6 +17,12 @@ export interface LLMModelStatus {
   retry: () => Promise<void>;
 }
 
+const MODEL_INITIALIZED_KEY = 'modelInitialized';
+const INIT_INCOMPLETE_MESSAGE = 'AI model initialization incomplete. Please reconnect and retry.';
+
+let sessionInitPromise: Promise<LanguageModelDiagnostics> | null = null;
+let sessionReadyDiagnostics: LanguageModelDiagnostics | null = null;
+
 const getLocalModelMarker = (): { modelId: string; preparedAt: string } | null => {
   try {
     const raw = localStorage.getItem(LOCAL_LLM_CACHE_KEY);
@@ -27,6 +33,45 @@ const getLocalModelMarker = (): { modelId: string; preparedAt: string } | null =
   }
 };
 
+const hasInitializedMarker = (): boolean => localStorage.getItem(MODEL_INITIALIZED_KEY) === 'true';
+
+const clearInitMarkers = () => {
+  localStorage.removeItem(MODEL_INITIALIZED_KEY);
+  localStorage.removeItem(LOCAL_LLM_CACHE_KEY);
+};
+
+const runInitializationOnce = (force: boolean): Promise<LanguageModelDiagnostics> => {
+  if (!force && sessionReadyDiagnostics) {
+    return Promise.resolve(sessionReadyDiagnostics);
+  }
+  if (!force && sessionInitPromise) {
+    return sessionInitPromise;
+  }
+
+  sessionInitPromise = (async () => {
+    const hasMarker = hasInitializedMarker();
+    console.info('[SpendSense][LLM] model initializing', { marker: hasMarker });
+
+    if (hasMarker) {
+      try {
+        const diag = await ensureLanguageModelReady();
+        sessionReadyDiagnostics = diag;
+        return diag;
+      } catch (error) {
+        console.warn('[SpendSense][LLM] stale marker detected, clearing marker and retrying init', error);
+        clearInitMarkers();
+      }
+    }
+
+    const diag = await ensureLanguageModelReady();
+    localStorage.setItem(MODEL_INITIALIZED_KEY, 'true');
+    sessionReadyDiagnostics = diag;
+    return diag;
+  })();
+
+  return sessionInitPromise;
+};
+
 export function useLLMModel(): LLMModelStatus {
   const [state, setState] = useState<LLMModelState>('initializing');
   const [progress, setProgress] = useState(0);
@@ -34,7 +79,7 @@ export function useLLMModel(): LLMModelStatus {
   const [diagnostics, setDiagnostics] = useState<LanguageModelDiagnostics | null>(null);
   const runningRef = useRef(false);
 
-  const prepare = useCallback(async () => {
+  const prepare = useCallback(async (force: boolean = false) => {
     if (runningRef.current) return;
     runningRef.current = true;
     setState('initializing');
@@ -56,25 +101,18 @@ export function useLLMModel(): LLMModelStatus {
         setState('loading');
       }
 
-      const diag = await ensureLanguageModelReady();
+      const diag = await runInitializationOnce(force);
       setDiagnostics(diag);
       setProgress(1);
       setState('ready');
-      localStorage.setItem(
-        LOCAL_LLM_CACHE_KEY,
-        JSON.stringify({ modelId: diag.modelId, preparedAt: new Date().toISOString() }),
-      );
-      console.info('[SpendSense][LLM] ready', diag);
+      console.info('[SpendSense][LLM] model initialized successfully', diag);
     } catch (err) {
-      const online = typeof navigator !== 'undefined' ? navigator.onLine : true;
-      const marker = getLocalModelMarker();
-      const base = err instanceof Error ? err.message : 'Failed to initialize on-device model.';
-      const message = !online && !marker
-        ? 'AI model is initializing. Connect once to finish first-time model download.'
-        : base;
-      setError(message);
+      clearInitMarkers();
+      sessionReadyDiagnostics = null;
+      sessionInitPromise = null;
+      setError(INIT_INCOMPLETE_MESSAGE);
       setState('error');
-      console.error('[SpendSense][LLM] initialization failed', err);
+      console.error('[SpendSense][LLM] model initialization failed', err);
     } finally {
       if (unsubscribe) unsubscribe();
       runningRef.current = false;
@@ -92,7 +130,7 @@ export function useLLMModel(): LLMModelStatus {
       ready: state === 'ready',
       error,
       diagnostics,
-      retry: prepare,
+      retry: () => prepare(true),
     }),
     [state, progress, error, diagnostics, prepare],
   );

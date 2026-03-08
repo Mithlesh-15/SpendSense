@@ -46,6 +46,7 @@ export function CategoryPieChart({ data }: CategoryPieChartProps) {
                 borderRadius: '0.75rem',
               }}
               labelStyle={{ color: isDark ? '#e2e8f0' : '#0f172a' }}
+              itemStyle={{ color: isDark ? '#f8fafc' : '#0f172a' }}
             />
           </PieChart>
         </ResponsiveContainer>
